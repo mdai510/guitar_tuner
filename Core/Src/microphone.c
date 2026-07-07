@@ -7,6 +7,13 @@
 
 #include "microphone.h"
 #include "main.h"
+#include "tim.h"
+#include "adc.h"
+#include "FreeRTOS.h"
+#include "task.h"
+#include "cmsis_os2.h"
+
+extern osThreadId_t AudioTaskHandle;
 
 static ADC_HandleTypeDef *mic_hadc;
 static uint16_t mic_adc_buf[MIC_BUF_SIZE];
@@ -19,6 +26,8 @@ void microphone_init(ADC_HandleTypeDef *hadc){
 // Start the DMA transfer for microphone data
 void microphone_start(void){
 	HAL_ADC_Start_DMA(mic_hadc, (uint32_t*)mic_adc_buf, MIC_BUF_SIZE);
+	// Start 8kHz timer
+	HAL_TIM_Base_Start(&htim6);
 }
 
 // Get buffer pointer
@@ -69,7 +78,14 @@ void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc) {
 			uint32_t min = min_buffer_uint32(mic_adc_buf, MIC_HALF_BUF_SIZE);
 			uint32_t peak_to_peak = max - min;
 
-	        printf("First half avg = %lu, max = %lu, min = %lu, peak-to-peak = %lu\r\n", avg, max, min, peak_to_peak);
+	        //printf("First half avg = %lu, max = %lu, min = %lu, peak-to-peak = %lu\r\n", avg, max, min, peak_to_peak);
+
+	        //send notification to audio task
+	        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+	        xTaskNotifyFromISR((TaskHandle_t)AudioTaskHandle, BUF_HALF_READY, eSetBits, &xHigherPriorityTaskWoken);
+
+			// If xHigherPriorityTaskWoken was set to true, we should yield.
+	        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 	    }
 }
 
@@ -82,6 +98,13 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
 			uint32_t min = min_buffer_uint32(&mic_adc_buf[MIC_HALF_BUF_SIZE], MIC_HALF_BUF_SIZE);
 			uint32_t peak_to_peak = max - min;
 
-	        printf("Second half avg = %lu, max = %lu, min = %lu, peak-to-peak = %lu\r\n", avg, max, min, peak_to_peak);
+	        //printf("Second half avg = %lu, max = %lu, min = %lu, peak-to-peak = %lu\r\n", avg, max, min, peak_to_peak);
+
+			//send notification to audio task
+	        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+	        xTaskNotifyFromISR((TaskHandle_t)AudioTaskHandle, BUF_FULL_READY, eSetBits, &xHigherPriorityTaskWoken);
+
+			// If xHigherPriorityTaskWoken was set to true, we should yield.
+	        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 	    }
 }
