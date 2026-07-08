@@ -6,4 +6,4 @@
 ../Core/Src/microphone.c:52:17:max_buffer_uint32	3
 ../Core/Src/microphone.c:62:17:min_buffer_uint32	3
 ../Core/Src/microphone.c:73:6:HAL_ADC_ConvHalfCpltCallback	3
-../Core/Src/microphone.c:93:6:HAL_ADC_ConvCpltCallback	3
+../Core/Src/microphone.c:94:6:HAL_ADC_ConvCpltCallback	3

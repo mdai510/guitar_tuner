@@ -73,12 +73,13 @@ static uint32_t min_buffer_uint32(const uint16_t *buf, uint32_t len){
 void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc) {
 	if (hadc == mic_hadc)
 	    {
+			/*
 	        uint32_t avg = ave_buffer_uint32(mic_adc_buf, MIC_HALF_BUF_SIZE);
 			uint32_t max = max_buffer_uint32(mic_adc_buf, MIC_HALF_BUF_SIZE);
 			uint32_t min = min_buffer_uint32(mic_adc_buf, MIC_HALF_BUF_SIZE);
 			uint32_t peak_to_peak = max - min;
 
-	        //printf("First half avg = %lu, max = %lu, min = %lu, peak-to-peak = %lu\r\n", avg, max, min, peak_to_peak);
+	        printf("First half avg = %lu, max = %lu, min = %lu, peak-to-peak = %lu\r\n", avg, max, min, peak_to_peak);*/
 
 	        //send notification to audio task
 	        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
@@ -93,12 +94,13 @@ void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc) {
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
 	if (hadc == mic_hadc)
 	    {
+			/*
 	        uint32_t avg = ave_buffer_uint32(&mic_adc_buf[MIC_HALF_BUF_SIZE], MIC_HALF_BUF_SIZE);
 			uint32_t max = max_buffer_uint32(&mic_adc_buf[MIC_HALF_BUF_SIZE], MIC_HALF_BUF_SIZE);
 			uint32_t min = min_buffer_uint32(&mic_adc_buf[MIC_HALF_BUF_SIZE], MIC_HALF_BUF_SIZE);
 			uint32_t peak_to_peak = max - min;
 
-	        //printf("Second half avg = %lu, max = %lu, min = %lu, peak-to-peak = %lu\r\n", avg, max, min, peak_to_peak);
+	        printf("Second half avg = %lu, max = %lu, min = %lu, peak-to-peak = %lu\r\n", avg, max, min, peak_to_peak); */
 
 			//send notification to audio task
 	        BaseType_t xHigherPriorityTaskWoken = pdFALSE;

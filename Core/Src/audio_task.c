@@ -8,9 +8,10 @@
 #include "microphone.h"
 #include "FreeRTOS.h"
 #include "task.h"
+#include "pitch.h"
 
 // buffer to hold microphone data
-uint32_t audio_buf[MIC_HALF_BUF_SIZE];
+static uint16_t audio_buf[MIC_HALF_BUF_SIZE];
 
 void vTaskAudio(void *argument){
 	microphone_init(&hadc1);
@@ -25,18 +26,21 @@ void vTaskAudio(void *argument){
 		if(notif_value & BUF_HALF_READY){
 			//copy first half of microphone buffer to audio buffer
 			const uint16_t *mic_buf = microphone_get_buffer();
-			for(uint32_t i = 0; i < MIC_HALF_BUF_SIZE; i++){
+			for(uint16_t i = 0; i < MIC_HALF_BUF_SIZE; i++){
 				audio_buf[i] = mic_buf[i];
 			}
-			printf("Half buffer ready\n\r");
+			//printf("Half buffer ready\n\r");
 		}
 		else if(notif_value & BUF_FULL_READY){
 			//copy second half of microphone buffer to audio buffer
 			const uint16_t *mic_buf = microphone_get_buffer();
-			for(uint32_t i = 0; i < MIC_HALF_BUF_SIZE; i++){
+			for(uint16_t i = 0; i < MIC_HALF_BUF_SIZE; i++){
 				audio_buf[i] = mic_buf[i + MIC_HALF_BUF_SIZE];
 			}
-			printf("Full buffer ready\n\r");
+			//printf("Full buffer ready\n\r");
 		}
+
+		float freq = get_freq(audio_buf, MIC_HALF_BUF_SIZE);
+		printf("%i\n\r", (int)freq);
 	}
 }

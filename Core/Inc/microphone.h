@@ -9,7 +9,6 @@
 #define INC_MICROPHONE_H_
 
 #include <stdint.h>
-#include "main.h"
 #include "tim.h"
 #include "adc.h"
 

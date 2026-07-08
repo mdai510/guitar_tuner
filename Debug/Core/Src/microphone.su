@@ -5,5 +5,5 @@
 ../Core/Src/microphone.c:44:17:ave_buffer_uint32	56	static
 ../Core/Src/microphone.c:52:17:max_buffer_uint32	24	static
 ../Core/Src/microphone.c:62:17:min_buffer_uint32	24	static
-../Core/Src/microphone.c:73:6:HAL_ADC_ConvHalfCpltCallback	48	static,ignoring_inline_asm
-../Core/Src/microphone.c:93:6:HAL_ADC_ConvCpltCallback	48	static,ignoring_inline_asm
+../Core/Src/microphone.c:73:6:HAL_ADC_ConvHalfCpltCallback	32	static,ignoring_inline_asm
+../Core/Src/microphone.c:94:6:HAL_ADC_ConvCpltCallback	32	static,ignoring_inline_asm
