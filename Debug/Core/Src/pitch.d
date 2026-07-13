@@ -34,7 +34,9 @@ Core/Src/pitch.o: ../Core/Src/pitch.c ../Core/Inc/pitch.h \
  ../Drivers/STM32G4xx_HAL_Driver/Inc/stm32g4xx_hal_uart_ex.h \
  ../Drivers/BSP/STM32G4xx_Nucleo/stm32g4xx_nucleo.h \
  ../Drivers/BSP/STM32G4xx_Nucleo/stm32g4xx_nucleo_errno.h \
- ../Core/Inc/stm32g4xx_nucleo_conf.h ../Core/Inc/adc.h
+ ../Core/Inc/stm32g4xx_nucleo_conf.h ../Core/Inc/adc.h \
+ ../Core/ThirdParty/kiss-fft/kiss_fftr.h \
+ ../Core/ThirdParty/kiss-fft/kiss_fft.h
 ../Core/Inc/pitch.h:
 ../Core/Inc/microphone.h:
 ../Core/Inc/tim.h:
@@ -75,3 +77,5 @@ Core/Src/pitch.o: ../Core/Src/pitch.c ../Core/Inc/pitch.h \
 ../Drivers/BSP/STM32G4xx_Nucleo/stm32g4xx_nucleo_errno.h:
 ../Core/Inc/stm32g4xx_nucleo_conf.h:
 ../Core/Inc/adc.h:
+../Core/ThirdParty/kiss-fft/kiss_fftr.h:
+../Core/ThirdParty/kiss-fft/kiss_fft.h:

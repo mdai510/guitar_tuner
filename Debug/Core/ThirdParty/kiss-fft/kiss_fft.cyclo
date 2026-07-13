@@ -1,0 +1,12 @@
+../Core/ThirdParty/kiss-fft/kiss_fft.c:15:13:kf_bfly2	2
+../Core/ThirdParty/kiss-fft/kiss_fft.c:38:13:kf_bfly4	3
+../Core/ThirdParty/kiss-fft/kiss_fft.c:86:13:kf_bfly3	2
+../Core/ThirdParty/kiss-fft/kiss_fft.c:130:13:kf_bfly5	2
+../Core/ThirdParty/kiss-fft/kiss_fft.c:192:13:kf_bfly_generic	7
+../Core/ThirdParty/kiss-fft/kiss_fft.c:236:6:kf_work	8
+../Core/ThirdParty/kiss-fft/kiss_fft.c:307:6:kf_factor	6
+../Core/ThirdParty/kiss-fft/kiss_fft.c:337:14:kiss_fft_alloc	8
+../Core/ThirdParty/kiss-fft/kiss_fft.c:375:6:kiss_fft_stride	4
+../Core/ThirdParty/kiss-fft/kiss_fft.c:401:6:kiss_fft	1
+../Core/ThirdParty/kiss-fft/kiss_fft.c:407:6:kiss_fft_cleanup	1
+../Core/ThirdParty/kiss-fft/kiss_fft.c:412:5:kiss_fft_next_fast_size	5

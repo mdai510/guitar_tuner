@@ -15,6 +15,7 @@ RM := rm -rf
 -include Middlewares/Third_Party/FreeRTOS/Source/subdir.mk
 -include Drivers/STM32G4xx_HAL_Driver/Src/subdir.mk
 -include Drivers/BSP/STM32G4xx_Nucleo/subdir.mk
+-include Core/ThirdParty/kiss-fft/subdir.mk
 -include Core/Startup/subdir.mk
 -include Core/Src/subdir.mk
 -include objects.mk
@@ -66,7 +67,7 @@ main-build: guitar_tuner.elf secondary-outputs
 
 # Tool invocations
 guitar_tuner.elf guitar_tuner.map: $(OBJS) $(USER_OBJS) C:\Users\maxda\OneDrive\Documents\stm32work\guitar_tuner\STM32G474RETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "guitar_tuner.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\maxda\OneDrive\Documents\stm32work\guitar_tuner\STM32G474RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="guitar_tuner.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+	arm-none-eabi-gcc -o "guitar_tuner.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\maxda\OneDrive\Documents\stm32work\guitar_tuner\STM32G474RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="guitar_tuner.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -u _printf_float -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 

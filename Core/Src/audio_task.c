@@ -15,7 +15,16 @@ static uint16_t audio_buf[MIC_HALF_BUF_SIZE];
 
 void vTaskAudio(void *argument){
 	microphone_init(&hadc1);
+
+	if(!fft_init()){
+		printf("FFT Initialization failed\r\n");
+
+		//stop task if pitch detection isn't working
+		vTaskDelete(NULL);
+	}
+
 	microphone_start();
+
 	for(;;){
 		//wait for notification from microphone DMA interrupt
 		uint32_t notif_value;
@@ -29,7 +38,6 @@ void vTaskAudio(void *argument){
 			for(uint16_t i = 0; i < MIC_HALF_BUF_SIZE; i++){
 				audio_buf[i] = mic_buf[i];
 			}
-			//printf("Half buffer ready\n\r");
 		}
 		else if(notif_value & BUF_FULL_READY){
 			//copy second half of microphone buffer to audio buffer
@@ -37,10 +45,9 @@ void vTaskAudio(void *argument){
 			for(uint16_t i = 0; i < MIC_HALF_BUF_SIZE; i++){
 				audio_buf[i] = mic_buf[i + MIC_HALF_BUF_SIZE];
 			}
-			//printf("Full buffer ready\n\r");
 		}
 
-		float freq = get_freq(audio_buf, MIC_HALF_BUF_SIZE);
-		printf("%i\n\r", (int)freq);
+		float frequency = get_freq_fft(audio_buf);
+		printf("Frequency: %.2f Hz\r\n", frequency);
 	}
 }

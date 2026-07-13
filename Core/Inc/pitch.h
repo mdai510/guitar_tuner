@@ -8,10 +8,14 @@
 #ifndef INC_PITCH_H_
 #define INC_PITCH_H_
 
-// get frequency from audio buffer using autocorrelation
-// if amplitude is too low, return 0
-// if frequency is out of reasonable range, return 0
-// otherwise return frequency in Hz
-float get_freq(const uint16_t *audio_buf, uint16_t buf_len);
+#include <stdbool.h>
+#include <stdint.h>
+
+//initialize fft config and buffers
+bool fft_init(void);
+
+void fft_deinit(void);
+
+float get_freq_fft(const uint16_t *audio_buf);
 
 #endif /* INC_PITCH_H_ */

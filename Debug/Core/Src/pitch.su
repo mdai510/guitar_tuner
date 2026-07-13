@@ -1,5 +1,10 @@
-../Core/Src/pitch.c:35:7:get_freq	24	static
-../Core/Src/pitch.c:52:12:find_period_autocorrelation	72	static
-../Core/Src/pitch.c:78:16:ave_amplitude	24	static
-../Core/Src/pitch.c:91:13:center_audio_buffer	32	static
-../Core/Src/pitch.c:99:17:ave_audio_buffer	24	static
+../Core/Src/pitch.c:90:6:fft_init	16	static
+../Core/Src/pitch.c:142:6:fft_deinit	8	static
+../Core/Src/pitch.c:162:7:get_freq_fft	24	static
+../Core/Src/pitch.c:178:14:fft_run	32	static
+../Core/Src/pitch.c:227:14:get_magnitude_squared	24	static
+../Core/Src/pitch.c:239:14:interpolate_peak_bin	40	static
+../Core/Src/pitch.c:276:13:initialize_hann_window	16	static
+../Core/Src/pitch.c:287:13:center_audio_buffer	24	static
+../Core/Src/pitch.c:298:17:ave_audio_buffer	24	static
+../Core/Src/pitch.c:311:17:ave_amplitude	24	static
