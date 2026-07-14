@@ -13,6 +13,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 
 #define MIN_SIGNAL_LVL       50U
 
@@ -25,6 +26,12 @@
 
 #define PI_F                 3.14159265358979323846f
 #define PARABOLA_EPSILON     1.0e-12f
+
+#define FREQ_ALLOWED_ERR          10
+#define FUNDAMENTAL_HARMONIC_PERCENT_THRESHOLD 0.3
+
+#define MIN_LAG (SAMPLE_RATE_HZ / TUNER_MAX_FREQ_HZ)
+#define MAX_LAG (SAMPLE_RATE_HZ / TUNER_MIN_FREQ_HZ)
 
 /*
  * Centered time-domain samples.
@@ -59,16 +66,25 @@ static void *fft_cfg_buffer = NULL;
  */
 static uint32_t min_bin = 0U;
 static uint32_t max_bin = 0U;
+static uint32_t min_str_bin = 0U;
+static uint32_t max_str_bin = 0U;
+
+/*
+ * FFT bin resolution
+*/
+static float bin_resolution = (float)SAMPLE_RATE_HZ / (float)FFT_BUF_SIZE;
 
 /*
  * Indicates whether fft_init() completed successfully.
  */
 static uint8_t fft_initialized = 0U;
 
+static float string_freq_mins[6] = {STRING_1_MIN_HZ, STRING_2_MIN_HZ, STRING_3_MIN_HZ, STRING_4_MIN_HZ, STRING_5_MIN_HZ, STRING_6_MIN_HZ};
+static float string_freq_maxs[6] = {STRING_1_MAX_HZ, STRING_2_MAX_HZ, STRING_3_MAX_HZ, STRING_4_MAX_HZ, STRING_5_MAX_HZ, STRING_6_MAX_HZ};
 
 /* Private function declarations */
 
-static float fft_run(void);
+static float fft_run(uint8_t string);
 
 static void center_audio_buffer(const uint16_t *audio_buf);
 static uint32_t ave_audio_buffer(const uint16_t *audio_buf);
@@ -77,6 +93,11 @@ static uint32_t ave_amplitude(void);
 static void initialize_hann_window(void);
 static float get_magnitude_squared(uint32_t bin);
 static float interpolate_peak_bin(uint32_t peak_bin);
+
+static int find_period_autocorrelation(const int16_t *centered_buf);
+#define PLOT_MIN_FREQ_HZ  40U
+#define PLOT_MAX_FREQ_HZ  500U
+static void print_fft_spectrum(void);
 
 /*
  * Initialize the FFT.
@@ -93,10 +114,8 @@ bool fft_init(void){
     //Ask KISS FFT how many bytes its configuration requires.
     kiss_fftr_alloc(FFT_BUF_SIZE, 0, NULL, &required_size);
     if (required_size == 0U) return false;
-
     fft_cfg_buffer = malloc(required_size);
     if (fft_cfg_buffer == NULL) return false;
-
     fft_cfg = kiss_fftr_alloc(FFT_BUF_SIZE, 0, fft_cfg_buffer, &required_size);
     if (fft_cfg == NULL){
         free(fft_cfg_buffer);
@@ -106,9 +125,9 @@ bool fft_init(void){
 
     //find the bins corresponding to the tuner frequency range.
     //since f = kFs/N --> k = fN/Fs
-    min_bin = ((uint32_t)TUNER_MIN_FREQ_HZ * (uint32_t)FFT_BUF_SIZE) / (uint32_t)SAMPLE_RATE_HZ;
+    min_bin = ((uint64_t)TUNER_MIN_FREQ_HZ * FFT_BUF_SIZE) / SAMPLE_RATE_HZ;
     //round the maximum bin upward so the upper frequency limit is included.
-    max_bin = (((uint32_t)TUNER_MAX_FREQ_HZ * (uint32_t)FFT_BUF_SIZE) + ((uint32_t)SAMPLE_RATE_HZ - 1U)) / (uint32_t)SAMPLE_RATE_HZ;
+    max_bin = ((uint64_t)TUNER_MAX_FREQ_HZ * FFT_BUF_SIZE) + (SAMPLE_RATE_HZ-1U) / SAMPLE_RATE_HZ;
     //bin zero is DC and should not be considered as a pitch.
     if (min_bin < 1U) min_bin = 1U;
 
@@ -159,8 +178,11 @@ void fft_deinit(void)
  *   estimated frequency in Hz
  *   0.0f if the signal is too quiet or the FFT is not initialized
  */
-float get_freq_fft(const uint16_t *audio_buf){
+float get_freq_fft(const uint16_t *audio_buf, uint8_t string){
     if ((audio_buf == NULL) || (fft_initialized == 0U)) return 0.0f;
+    if(string > 6 || string < 1) return 0.0f;
+    //to be able to index into array
+    string -= 1;
 
     //convert the unsigned ADC signal into a signed, zero-centered signal.
     center_audio_buffer(audio_buf);
@@ -169,32 +191,106 @@ float get_freq_fft(const uint16_t *audio_buf){
     uint32_t average_amplitude = ave_amplitude();
     if (average_amplitude < MIN_SIGNAL_LVL) return 0.0f;
 
-    return fft_run();
+    return fft_run(string);
+}
+
+float get_freq(const uint16_t *audio_buf, float expected_freq){
+	if (audio_buf == NULL) return 0.0f;
+
+	//convert the unsigned ADC signal into a signed, zero-centered signal.
+	center_audio_buffer(audio_buf);
+
+	//reject silence and low-level background noise.
+	uint32_t average_amplitude = ave_amplitude();
+	if (average_amplitude < MIN_SIGNAL_LVL) return 0.0f;
+
+	int bestLag = find_period_autocorrelation(centered_audio_buf);
+	if(bestLag <= 0.0){
+		return 0.0;
+	}
+
+	return (float)SAMPLE_RATE_HZ / (float)bestLag;
+}
+
+//helper to calculate the best lag using autocorrelation
+static int find_period_autocorrelation(const int16_t *centered_buf){
+    int bestLag = 0;
+    int64_t bestCorrelation = INT64_MIN;
+
+    //only interested in frequencies for open string guitar tunings
+    for (int lag = MIN_LAG; lag <= MAX_LAG; lag++){
+        int64_t correlation = 0;
+
+        for (uint32_t i = 0; i < MIC_HALF_BUF_SIZE - lag; i++){
+            correlation += (int32_t)centered_buf[i] *
+                           (int32_t)centered_buf[i + lag];
+        }
+
+        if (correlation > bestCorrelation){
+            bestCorrelation = correlation;
+            bestLag = lag;
+        }
+    }
+
+    return bestLag;
+}
+
+static void print_fft_spectrum(void)
+{
+    uint32_t plot_min_bin =
+        (PLOT_MIN_FREQ_HZ * FFT_BUF_SIZE) / SAMPLE_RATE_HZ;
+
+    uint32_t plot_max_bin =
+        (PLOT_MAX_FREQ_HZ * FFT_BUF_SIZE) / SAMPLE_RATE_HZ;
+
+    if (plot_max_bin > (FFT_BUF_SIZE / 2U))
+    {
+        plot_max_bin = FFT_BUF_SIZE / 2U;
+    }
+
+    printf("BEGIN\r\n");
+
+    for (uint32_t bin = plot_min_bin; bin <= plot_max_bin; bin++)
+    {
+        float real = (float)fft_out[bin].r;
+        float imag = (float)fft_out[bin].i;
+
+        float magnitude_squared =
+            (real * real) + (imag * imag);
+
+        float frequency =
+            ((float)bin * (float)SAMPLE_RATE_HZ) /
+            (float)FFT_BUF_SIZE;
+
+        printf("%.3f,%.6e\r\n",
+               frequency,
+               magnitude_squared);
+    }
+
+    printf("END\r\n");
 }
 
 /*
  * Prepare and run the FFT, find the dominant peak, and return its frequency.
  */
-static float fft_run(void)
+static float fft_run(uint8_t string)
 {
-    /*
-     * Apply the precomputed Hann window.
-     *
-     * The window reduces spectral leakage when the sample frame does not
-     * contain an integer number of waveform periods.
-     */
+	//apply hann window
     for (uint32_t i = 0U; i < FFT_BUF_SIZE; i++){
-        fft_in[i] = (kiss_fft_scalar)((float)centered_audio_buf[i] *hann_window[i]);
+        fft_in[i] = (kiss_fft_scalar)((float)centered_audio_buf[i] * hann_window[i]);
     }
 
     //fft_out covers frequencies from zero to Nyquist
     kiss_fftr(fft_cfg, fft_in, fft_out);
 
-    uint32_t best_bin = min_bin;
-    float best_magnitude_squared = get_magnitude_squared(min_bin);
+    min_str_bin = ((uint64_t)string_freq_mins[string] * FFT_BUF_SIZE) / SAMPLE_RATE_HZ;
+    max_str_bin = ((uint64_t)string_freq_maxs[string] * FFT_BUF_SIZE) / SAMPLE_RATE_HZ;
 
-    //search only the expected guitar-frequency range.
-    for (uint32_t bin = min_bin + 1U; bin <= max_bin; bin++)
+    uint32_t best_bin = min_str_bin;
+    float best_magnitude_squared = get_magnitude_squared(min_str_bin);
+
+    //search only the expected guitar-frequency range +- a few bins
+    for (uint32_t bin = min_str_bin - 1U; bin <= max_str_bin + 1U; bin++)
     {
         float magnitude_squared = get_magnitude_squared(bin);
 
@@ -204,13 +300,88 @@ static float fft_run(void)
         }
     }
 
+    //If best bin is +- FREQ_ALLOWED_ERR of the expected frequency, interpolate and return the frequency
+    //If not, check the half frequency (best_bin / 2) and the bins around it
+    //If there is a peak there that is above <threshold> percent of the best bin, return that frequency instead
+    //If that is still not within the expected range, return 0.0f
     /*
-     * Find a fractional bin location using the bins immediately beside the
-     * peak. This gives better resolution than returning only integer bins.
-     */
+    float best_freq = (float)best_bin * bin_resolution;
+    printf("best freq: %f\r\n", best_freq);
+    //check if outside expected range
+    if((best_freq < expected_freq - FREQ_ALLOWED_ERR) || (best_freq > expected_freq + FREQ_ALLOWED_ERR)){
+    	uint32_t half_bin = best_bin / 2U;
+
+		uint32_t error_bins =
+			(uint32_t)ceilf(
+				(float)FREQ_ALLOWED_ERR / bin_resolution
+			);
+
+		uint32_t half_min_bin =
+			(half_bin > error_bins)
+				? half_bin - error_bins
+				: 1U;
+
+		uint32_t half_max_bin = half_bin + error_bins;
+
+		/*
+		 * Keep the temporary search inside the permanent
+		 * tuner frequency range.
+		 */
+         /*
+		if (half_min_bin < min_bin)
+		{
+			half_min_bin = min_bin;
+		}
+
+		if (half_max_bin > max_bin)
+		{
+			half_max_bin = max_bin;
+		}
+
+		/*
+		 * If the half-frequency region is below the supported
+		 * tuner range, reject it.
+		 */
+         /*
+		if (half_min_bin > half_max_bin)
+		{
+			return 0.0f;
+		}
+
+		uint32_t fundamental_bin = half_min_bin;
+		float fundamental_mag_squared =
+			get_magnitude_squared(fundamental_bin);
+
+		for (uint32_t bin = half_min_bin + 1U;
+			 bin <= half_max_bin;
+			 bin++)
+		{
+			float magnitude_squared =
+				get_magnitude_squared(bin);
+
+			if (magnitude_squared > fundamental_mag_squared)
+			{
+				fundamental_mag_squared = magnitude_squared;
+				fundamental_bin = bin;
+			}
+		}
+
+		if (fundamental_mag_squared >
+			best_magnitude_squared *
+			FUNDAMENTAL_HARMONIC_PERCENT_THRESHOLD)
+		{
+			best_bin = fundamental_bin;
+		}
+		else
+		{
+			return 0.0f;
+		}
+    } */
+
+    //Interpolate the original or halved bin to get a more accurate frequency estimate
     float fractional_bin = interpolate_peak_bin(best_bin);
 
-    return fractional_bin * (float)SAMPLE_RATE_HZ / (float)FFT_BUF_SIZE;
+    return fractional_bin * bin_resolution;
 }
 
 /*

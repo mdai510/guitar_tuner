@@ -9,24 +9,20 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "pitch.h"
+#include "button.h"
+#include "note.h"
 
 // buffer to hold microphone data
 static uint16_t audio_buf[MIC_HALF_BUF_SIZE];
 
 void vTaskAudio(void *argument){
-	microphone_init(&hadc1);
+	//suspend task, wait till guitar notes are selected and button is pressed
+	vTaskSuspend(NULL);
 
-	if(!fft_init()){
-		printf("FFT Initialization failed\r\n");
-
-		//stop task if pitch detection isn't working
-		vTaskDelete(NULL);
-	}
-
-	microphone_start();
+	//ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+	uint8_t string = 6;
 
 	for(;;){
-		//wait for notification from microphone DMA interrupt
 		uint32_t notif_value;
 
 		xTaskNotifyWait(0x00, BUF_HALF_READY | BUF_FULL_READY, &notif_value, portMAX_DELAY);
@@ -47,7 +43,17 @@ void vTaskAudio(void *argument){
 			}
 		}
 
-		float frequency = get_freq_fft(audio_buf);
+		float frequency = get_freq_fft(audio_buf, string);
 		printf("Frequency: %.2f Hz\r\n", frequency);
+
+		if(b1_pressed_debounced()){
+			if(string <= 1) {
+				printf("string 6\r\n");
+				string = 6;
+				continue;
+			}
+			string--;
+			printf("string %i\r\n", string);
+		}
 	}
 }

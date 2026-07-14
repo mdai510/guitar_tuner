@@ -44,7 +44,10 @@ Core/Src/app_freertos.o: ../Core/Src/app_freertos.c \
  ../Drivers/BSP/STM32G4xx_Nucleo/stm32g4xx_nucleo_errno.h \
  ../Core/Inc/stm32g4xx_nucleo_conf.h \
  ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os.h \
- ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.h
+ ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.h \
+ ../Core/Inc/button.h ../Core/Inc/microphone.h ../Core/Inc/tim.h \
+ ../Core/Inc/main.h ../Core/Inc/adc.h ../Core/Inc/pitch.h \
+ ../Core/Inc/note.h
 ../Middlewares/Third_Party/FreeRTOS/Source/include/FreeRTOS.h:
 ../Core/Inc/FreeRTOSConfig.h:
 ../Middlewares/Third_Party/FreeRTOS/Source/include/projdefs.h:
@@ -92,3 +95,10 @@ Core/Src/app_freertos.o: ../Core/Src/app_freertos.c \
 ../Core/Inc/stm32g4xx_nucleo_conf.h:
 ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os.h:
 ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.h:
+../Core/Inc/button.h:
+../Core/Inc/microphone.h:
+../Core/Inc/tim.h:
+../Core/Inc/main.h:
+../Core/Inc/adc.h:
+../Core/Inc/pitch.h:
+../Core/Inc/note.h:

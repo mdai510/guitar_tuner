@@ -25,12 +25,23 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "button.h"
+#include "microphone.h"
+#include "pitch.h"
+#include "note.h"
 
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 
+//for now, state enum is here
+typedef enum{
+	STATE_INIT,
+	STATE_LISTEN,
+	STATE_ADJUST,
+	STATE_DONE
+} state_t;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -45,12 +56,13 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
+note_t chosen_notes[6];
 
 /* USER CODE END Variables */
-/* Definitions for defaultTask */
-osThreadId_t defaultTaskHandle;
-const osThreadAttr_t defaultTask_attributes = {
-  .name = "defaultTask",
+/* Definitions for ControlTask */
+osThreadId_t ControlTaskHandle;
+const osThreadAttr_t ControlTask_attributes = {
+  .name = "ControlTask",
   .priority = (osPriority_t) osPriorityNormal,
   .stack_size = 128 * 4
 };
@@ -58,7 +70,7 @@ const osThreadAttr_t defaultTask_attributes = {
 osThreadId_t AudioTaskHandle;
 const osThreadAttr_t AudioTask_attributes = {
   .name = "AudioTask",
-  .priority = (osPriority_t) osPriorityAboveNormal,
+  .priority = (osPriority_t) osPriorityNormal,
   .stack_size = 512 * 4
 };
 
@@ -67,7 +79,7 @@ const osThreadAttr_t AudioTask_attributes = {
 
 /* USER CODE END FunctionPrototypes */
 
-void StartDefaultTask(void *argument);
+void vTaskControl(void *argument);
 extern void vTaskAudio(void *argument);
 
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
@@ -99,8 +111,8 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* creation of defaultTask */
-  defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
+  /* creation of ControlTask */
+  ControlTaskHandle = osThreadNew(vTaskControl, NULL, &ControlTask_attributes);
 
   /* creation of AudioTask */
   AudioTaskHandle = osThreadNew(vTaskAudio, NULL, &AudioTask_attributes);
@@ -115,23 +127,53 @@ void MX_FREERTOS_Init(void) {
 
 }
 
-/* USER CODE BEGIN Header_StartDefaultTask */
+/* USER CODE BEGIN Header_vTaskControl */
 /**
-  * @brief  Function implementing the defaultTask thread.
+  * @brief  Function implementing the ControlTask thread.
   * @param  argument: Not used
   * @retval None
   */
-/* USER CODE END Header_StartDefaultTask */
-void StartDefaultTask(void *argument)
+/* USER CODE END Header_vTaskControl */
+void vTaskControl(void *argument)
 {
-  /* USER CODE BEGIN StartDefaultTask */
+  /* USER CODE BEGIN vTaskControl */
+	state_t state = STATE_INIT;
+
+	//initialize
+	microphone_init(&hadc1);
+	if(!fft_init()){
+		printf("FFT Initialization failed\r\n");
+
+		//stop task if pitch detection isn't working
+		vTaskDelete(NULL);
+	}
+	printf("initialization done\r\n");
 
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+	  switch(state){
+	  case STATE_INIT:
+		  //choose tuning here
+		  if(b1_pressed_debounced()){
+			  printf("button pressed\r\n");
+			  microphone_start();
+			  state = STATE_LISTEN;
+		  }
+		  break;
+	  case STATE_LISTEN:
+		  printf("state listen\r\n");
+		  vTaskResume(AudioTaskHandle);
+		  vTaskSuspend(NULL);
+		  break;
+	  case STATE_ADJUST:
+		  break;
+	  case STATE_DONE:
+		  break;
+	  }
+
   }
-  /* USER CODE END StartDefaultTask */
+  /* USER CODE END vTaskControl */
 }
 
 /* Private application code --------------------------------------------------*/
