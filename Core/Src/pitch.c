@@ -15,7 +15,7 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 
-#define MIN_SIGNAL_LVL       50U
+#define MIN_SIGNAL_LVL       55U
 
 #define SAMPLE_RATE_HZ       8000U
 
@@ -194,82 +194,6 @@ float get_freq_fft(const uint16_t *audio_buf, uint8_t string){
     return fft_run(string);
 }
 
-float get_freq(const uint16_t *audio_buf, float expected_freq){
-	if (audio_buf == NULL) return 0.0f;
-
-	//convert the unsigned ADC signal into a signed, zero-centered signal.
-	center_audio_buffer(audio_buf);
-
-	//reject silence and low-level background noise.
-	uint32_t average_amplitude = ave_amplitude();
-	if (average_amplitude < MIN_SIGNAL_LVL) return 0.0f;
-
-	int bestLag = find_period_autocorrelation(centered_audio_buf);
-	if(bestLag <= 0.0){
-		return 0.0;
-	}
-
-	return (float)SAMPLE_RATE_HZ / (float)bestLag;
-}
-
-//helper to calculate the best lag using autocorrelation
-static int find_period_autocorrelation(const int16_t *centered_buf){
-    int bestLag = 0;
-    int64_t bestCorrelation = INT64_MIN;
-
-    //only interested in frequencies for open string guitar tunings
-    for (int lag = MIN_LAG; lag <= MAX_LAG; lag++){
-        int64_t correlation = 0;
-
-        for (uint32_t i = 0; i < MIC_HALF_BUF_SIZE - lag; i++){
-            correlation += (int32_t)centered_buf[i] *
-                           (int32_t)centered_buf[i + lag];
-        }
-
-        if (correlation > bestCorrelation){
-            bestCorrelation = correlation;
-            bestLag = lag;
-        }
-    }
-
-    return bestLag;
-}
-
-static void print_fft_spectrum(void)
-{
-    uint32_t plot_min_bin =
-        (PLOT_MIN_FREQ_HZ * FFT_BUF_SIZE) / SAMPLE_RATE_HZ;
-
-    uint32_t plot_max_bin =
-        (PLOT_MAX_FREQ_HZ * FFT_BUF_SIZE) / SAMPLE_RATE_HZ;
-
-    if (plot_max_bin > (FFT_BUF_SIZE / 2U))
-    {
-        plot_max_bin = FFT_BUF_SIZE / 2U;
-    }
-
-    printf("BEGIN\r\n");
-
-    for (uint32_t bin = plot_min_bin; bin <= plot_max_bin; bin++)
-    {
-        float real = (float)fft_out[bin].r;
-        float imag = (float)fft_out[bin].i;
-
-        float magnitude_squared =
-            (real * real) + (imag * imag);
-
-        float frequency =
-            ((float)bin * (float)SAMPLE_RATE_HZ) /
-            (float)FFT_BUF_SIZE;
-
-        printf("%.3f,%.6e\r\n",
-               frequency,
-               magnitude_squared);
-    }
-
-    printf("END\r\n");
-}
-
 /*
  * Prepare and run the FFT, find the dominant peak, and return its frequency.
  */
@@ -287,7 +211,9 @@ static float fft_run(uint8_t string)
     max_str_bin = ((uint64_t)string_freq_maxs[string] * FFT_BUF_SIZE) / SAMPLE_RATE_HZ;
 
     uint32_t best_bin = min_str_bin;
+    uint32_t next_best_bin = min_str_bin;
     float best_magnitude_squared = get_magnitude_squared(min_str_bin);
+    float next_best_mag_sqr = best_magnitude_squared;
 
     //search only the expected guitar-frequency range +- a few bins
     for (uint32_t bin = min_str_bin - 1U; bin <= max_str_bin + 1U; bin++)
@@ -295,8 +221,15 @@ static float fft_run(uint8_t string)
         float magnitude_squared = get_magnitude_squared(bin);
 
         if (magnitude_squared > best_magnitude_squared){
+        	next_best_mag_sqr = best_magnitude_squared;
+        	next_best_bin = best_bin;
             best_magnitude_squared = magnitude_squared;
             best_bin = bin;
+
+        }
+        else if(magnitude_squared > next_best_mag_sqr && magnitude_squared < best_magnitude_squared){
+        	next_best_mag_sqr = magnitude_squared;
+        	next_best_bin = bin;
         }
     }
 
@@ -377,6 +310,8 @@ static float fft_run(uint8_t string)
 			return 0.0f;
 		}
     } */
+    float scnd_frac_bin = interpolate_peak_bin(next_best_bin);
+    //printf("2nd best: %.2f\r\n", scnd_frac_bin * bin_resolution);
 
     //Interpolate the original or halved bin to get a more accurate frequency estimate
     float fractional_bin = interpolate_peak_bin(best_bin);
