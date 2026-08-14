@@ -18,6 +18,7 @@ RM := rm -rf
 -include Core/ThirdParty/kiss-fft/subdir.mk
 -include Core/Startup/subdir.mk
 -include Core/Src/subdir.mk
+-include Core/Inc/subdir.mk
 -include objects.mk
 
 ifneq ($(MAKECMDGOALS),clean)

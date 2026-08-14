@@ -29,6 +29,7 @@
 #include "microphone.h"
 #include "pitch.h"
 #include "note.h"
+#include "motor_cntrl.h"
 
 /* USER CODE END Includes */
 

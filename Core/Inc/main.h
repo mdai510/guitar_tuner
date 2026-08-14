@@ -68,6 +68,10 @@ void Error_Handler(void);
 #define RCC_OSC_IN_GPIO_Port GPIOF
 #define RCC_OSC_OUT_Pin GPIO_PIN_1
 #define RCC_OSC_OUT_GPIO_Port GPIOF
+#define MotorEN_Pin GPIO_PIN_8
+#define MotorEN_GPIO_Port GPIOA
+#define MotorDIR_Pin GPIO_PIN_9
+#define MotorDIR_GPIO_Port GPIOA
 #define Button1_Pin GPIO_PIN_10
 #define Button1_GPIO_Port GPIOA
 #define Button1_EXTI_IRQn EXTI15_10_IRQn

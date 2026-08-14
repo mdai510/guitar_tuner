@@ -1,3 +1,4 @@
+"./Core/Inc/motor_cntrl.o"
 "./Core/Src/adc.o"
 "./Core/Src/app_freertos.o"
 "./Core/Src/audio_task.o"

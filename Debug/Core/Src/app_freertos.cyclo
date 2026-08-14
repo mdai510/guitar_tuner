@@ -1,2 +1,2 @@
-../Core/Src/app_freertos.c:92:6:MX_FREERTOS_Init	1
-../Core/Src/app_freertos.c:137:6:vTaskControl	5
+../Core/Src/app_freertos.c:93:6:MX_FREERTOS_Init	1
+../Core/Src/app_freertos.c:138:6:vTaskControl	2
