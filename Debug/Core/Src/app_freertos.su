@@ -1,2 +1,0 @@
-../Core/Src/app_freertos.c:93:6:MX_FREERTOS_Init	8	static
-../Core/Src/app_freertos.c:138:6:vTaskControl	24	static

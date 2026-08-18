@@ -1,4 +1,0 @@
-../Core/Inc/motor_cntrl.c:19:6:motor_cntrl_enable	8	static
-../Core/Inc/motor_cntrl.c:26:6:motor_cntrl_disable	8	static
-../Core/Inc/motor_cntrl.c:33:6:motor_cntrl_start	8	static
-../Core/Inc/motor_cntrl.c:41:6:motor_cntrl_stop	8	static

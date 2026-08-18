@@ -1,7 +1,0 @@
-../Core/Src/microphone.c:24:6:microphone_init	16	static
-../Core/Src/microphone.c:31:6:microphone_start	8	static
-../Core/Src/microphone.c:40:6:microhone_stop	8	static
-../Core/Src/microphone.c:48:17:microphone_get_buffer	4	static
-../Core/Src/microphone.c:55:10:microphone_get_buffer_length	4	static
-../Core/Src/microphone.c:62:6:HAL_ADC_ConvHalfCpltCallback	32	static,ignoring_inline_asm
-../Core/Src/microphone.c:76:6:HAL_ADC_ConvCpltCallback	32	static,ignoring_inline_asm
