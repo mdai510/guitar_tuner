@@ -30,6 +30,7 @@
 #include "pitch.h"
 #include "note.h"
 #include "motor_cntrl.h"
+#include "lcd.h"
 
 /* USER CODE END Includes */
 
@@ -141,10 +142,25 @@ void vTaskControl(void *argument)
 	state_t state = STATE_INIT;
 
 	//initialize
+	if (!lcd_init()){
+	    Error_Handler();
+	}
+
+	if (!lcd_clear()){
+	    Error_Handler();
+	}
+
+	/*
+	if (!lcd_fill_rect(20U, 20U, 100U, 50U, LCD_COLOR_RED)) {
+	    Error_Handler();
+	}*/
+	if(!lcd_draw_text(10U, 10U, "Standard", &Atkinson32, LCD_COLOR_WHITE, LCD_COLOR_BLACK)) printf("print 32 failed \r\n");
+	if(!lcd_draw_text(10U, 60U, "48 Standard b #", &Atkinson48, LCD_COLOR_YELLOW, LCD_COLOR_BLACK)) printf("print 48 failed \r\n");
+	if(!lcd_draw_text(130U, 130U, "A  B  C#", &Atkinson72, LCD_COLOR_GREEN, LCD_COLOR_BLACK)) printf("print 72 failed \r\n");
+
 	microphone_init(&hadc1);
 	if(!fft_init()){
 		printf("FFT Initialization failed\r\n");
-
 		//stop task if pitch detection isn't working
 		vTaskDelete(NULL);
 	}

@@ -13,7 +13,7 @@
 
 static TIM_HandleTypeDef *mtr_tim_handle = &htim3;
 //motor direction: 1 = clockwise, 0 = counterclockwise
-static uint_8 mtr_dir = 0;
+static uint8_t mtr_dir = 0;
 
 /*
  * Write EN low to enable output to motor
@@ -43,3 +43,4 @@ void motor_cntrl_start(void){
 void motor_cntrl_stop(void){
 	HAL_TIM_PWM_Stop(mtr_tim_handle, MTR_TIM_CHANNEL);
 }
+

@@ -1,0 +1,26 @@
+# STM32CubeIDE generated build output
+Debug/
+Release/
+
+# Common build products
+*.o
+*.d
+*.su
+*.map
+*.list
+*.elf
+*.hex
+*.bin
+
+# Temporary and local IDE files
+.settings/
+
+# VS Code local workspace settings (optional to track)
+.vscode/
+
+# Python cache/artifacts (for helper scripts)
+__pycache__/
+*.pyc
+
+#scripts (font converter)
+scripts/
