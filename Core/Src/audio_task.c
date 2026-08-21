@@ -28,7 +28,7 @@ void vTaskAudio(void *argument){
 	//suspend task, wait till guitar notes are selected and button is pressed
 	vTaskSuspend(NULL);
 
-	//ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+	ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 	uint8_t string = 6;
 
 	for(;;){
@@ -53,7 +53,7 @@ void vTaskAudio(void *argument){
 		}
 
 		float frequency = get_freq_fft(audio_buf, string);
-		//printf("Frequency: %.2f Hz\r\n", frequency);
+		printf("Frequency: %.2f Hz\r\n", frequency);
 		if(frequency == 0.0) continue;
 
 		uint8_t freq_match_count = 0;

@@ -85,6 +85,12 @@ void Error_Handler(void);
 #define T_SWCLK_GPIO_Port GPIOA
 #define T_SWO_Pin GPIO_PIN_3
 #define T_SWO_GPIO_Port GPIOB
+#define Button2_Pin GPIO_PIN_4
+#define Button2_GPIO_Port GPIOB
+#define Button2_EXTI_IRQn EXTI4_IRQn
+#define Button3_Pin GPIO_PIN_5
+#define Button3_GPIO_Port GPIOB
+#define Button3_EXTI_IRQn EXTI9_5_IRQn
 #define LCD_CS_Pin GPIO_PIN_6
 #define LCD_CS_GPIO_Port GPIOB
 

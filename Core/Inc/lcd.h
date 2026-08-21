@@ -26,6 +26,8 @@
 #define LCD_COLOR_CYAN     0x07FFU
 #define LCD_COLOR_MAGENTA  0xF81FU
 
+#define LCD_BG_COLOR LCD_COLOR_BLACK
+
 bool lcd_init(void);
 
 bool lcd_clear(void);

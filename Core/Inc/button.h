@@ -11,5 +11,7 @@
 #include <stdbool.h>
 
 bool b1_pressed_debounced(void);
+bool b2_pressed_debounced(void);
+bool b3_pressed_debounced(void);
 
 #endif /* INC_BUTTON_H_ */
