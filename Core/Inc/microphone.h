@@ -26,4 +26,10 @@ void microphone_stop(void); //Stop DMA transfer when not in use
 const uint16_t* microphone_get_buffer(void);
 uint32_t microphone_get_buffer_length(void);
 
+/* Atomically return and clear the DMA half/full completion flags. */
+uint32_t microphone_take_ready_flags(void);
+
+/* Discard any DMA buffer completions that have not been processed yet. */
+void microphone_discard_pending(void);
+
 #endif /* INC_MICROPHONE_H_ */

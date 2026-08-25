@@ -18,7 +18,6 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "cmsis_os.h"
 #include "adc.h"
 #include "dma.h"
 #include "spi.h"
@@ -27,13 +26,35 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "audio_processing.h"
+#include "button.h"
+#include "lcd.h"
 #include "microphone.h"
+#include "motor_cntrl.h"
+#include "note.h"
+#include "pitch.h"
+
+#include <stdbool.h>
 #include <string.h>
 #include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+typedef enum {
+  STATE_TUNING_SELECT,
+  STATE_LISTEN,
+  STATE_ADJUST,
+  STATE_DONE
+} state_t;
+
+typedef enum {
+  UI_DIRTY_NONE = 0U,
+  UI_DIRTY_FULL = (1UL << 0),
+  UI_DIRTY_TUNING = (1UL << 1),
+  UI_DIRTY_STRING = (1UL << 2),
+  UI_DIRTY_PITCH = (1UL << 3)
+} ui_dirty_t;
 
 /* USER CODE END PTD */
 
@@ -52,13 +73,21 @@
 COM_InitTypeDef BspCOMInit;
 
 /* USER CODE BEGIN PV */
+static uint8_t tuning_idx = 0U;
+static tuning_t chosen_tuning;
+static uint8_t current_string = 6U;
+static uint32_t ui_state = UI_DIRTY_FULL;
 
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-void MX_FREERTOS_Init(void);
 /* USER CODE BEGIN PFP */
+static bool ui_draw_tuning_selection(uint16_t selected_tuning, bool full_redraw);
+static bool ui_draw_listen_adjust_screen(uint8_t string, bool full_redraw);
+static bool ui_draw_done_screen(void);
+static bool string_to_array_index(uint8_t string, uint8_t *array_index);
+static uint16_t ui_text_width(const char *text, const lcd_font_t *font);
 
 /* USER CODE END PFP */
 
@@ -75,6 +104,8 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
+  state_t state = STATE_TUNING_SELECT;
+  audio_processing_result_t audio_result = {0};
 
   /* USER CODE END 1 */
 
@@ -102,12 +133,23 @@ int main(void)
   MX_TIM3_Init();
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
+  if (!lcd_init()) {
+    Error_Handler();
+  }
+
+  if (!lcd_clear()) {
+    Error_Handler();
+  }
+
+  microphone_init(&hadc1);
+
+  if (!fft_init()) {
+    Error_Handler();
+  }
+
+  audio_processing_reset();
 
   /* USER CODE END 2 */
-
-  /* Init scheduler */
-  osKernelInitialize();  /* Call init function for freertos objects (in cmsis_os2.c) */
-  MX_FREERTOS_Init();
 
   /* Initialize USER push-button, will be used to trigger an interrupt each time it's pressed.*/
   BSP_PB_Init(BUTTON_USER, BUTTON_MODE_EXTI);
@@ -123,16 +165,120 @@ int main(void)
     Error_Handler();
   }
 
-  /* Start scheduler */
-  osKernelStart();
-
-  /* We should never get here as control is now taken by the scheduler */
-
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
-  while (1)
-  {
+  while (1)  {
+    switch (state) {
+      case STATE_TUNING_SELECT:
+        if (b2_pressed_debounced()) {
+          if (tuning_idx == 0U) {
+            tuning_idx = NUM_TUNINGS - 1U;
+          }
+          else {
+            tuning_idx--;
+          }
+
+          ui_state |= UI_DIRTY_TUNING;
+        }
+        else if (b3_pressed_debounced()) {
+          tuning_idx = (tuning_idx + 1U) % NUM_TUNINGS;
+          ui_state |= UI_DIRTY_TUNING;
+        }
+        else if (b1_pressed_debounced()) {
+          chosen_tuning = tunings[tuning_idx];
+          current_string = 6U;
+          audio_processing_reset();
+          microphone_start();
+          state = STATE_LISTEN;
+          ui_state = UI_DIRTY_FULL;
+        }
+        break;
+
+      case STATE_LISTEN:
+        if (audio_process_pending(current_string, &audio_result)) {
+          if (audio_result.frequency_valid) {
+            printf("Frequency: %.2f Hz\r\n", audio_result.frequency_hz);
+          }
+
+          if (audio_result.stable_frequency) {
+            printf("string %u: %.2f Hz\r\n",
+                   (unsigned int)current_string,
+                   audio_result.frequency_hz);
+
+            if (current_string <= 1U) {
+              microphone_stop();
+              state = STATE_DONE;
+              ui_state = UI_DIRTY_FULL;
+            }
+            else {
+              current_string--;
+              audio_processing_reset();
+              ui_state |= UI_DIRTY_STRING;
+            }
+          }
+        }
+        break;
+
+      case STATE_ADJUST:
+        /* Motor adjustment will be added here. */
+        break;
+
+      case STATE_DONE:
+        if (b1_pressed_debounced()) {
+          microphone_stop();
+          microphone_discard_pending();
+          state = STATE_TUNING_SELECT;
+          ui_state = UI_DIRTY_FULL;
+        }
+        break;
+
+      default:
+        microphone_stop();
+        state = STATE_TUNING_SELECT;
+        ui_state = UI_DIRTY_FULL;
+        break;
+    }
+
+    if (ui_state != UI_DIRTY_NONE) {
+      bool draw_ok = true;
+
+      switch (state) {
+        case STATE_TUNING_SELECT:
+          draw_ok = ui_draw_tuning_selection(
+              tuning_idx,
+              (ui_state & UI_DIRTY_FULL) != 0U);
+          break;
+
+        case STATE_LISTEN:
+          if ((ui_state & (UI_DIRTY_FULL | UI_DIRTY_STRING)) != 0U) {
+            draw_ok = ui_draw_listen_adjust_screen(
+                current_string,
+                (ui_state & UI_DIRTY_FULL) != 0U);
+          }
+          break;
+
+        case STATE_DONE:
+          if ((ui_state & UI_DIRTY_FULL) != 0U) {
+            draw_ok = ui_draw_done_screen();
+          }
+          break;
+
+        case STATE_ADJUST:
+        default:
+          break;
+      }
+
+      if (draw_ok) {
+        ui_state = UI_DIRTY_NONE;
+      }
+      else {
+        printf("UI draw failed\r\n");
+      }
+    }
+
+    /* TIM7 wakes the CPU every millisecond for HAL_GetTick(). */
+    __WFI();
 
     /* USER CODE END WHILE */
 
@@ -188,30 +334,150 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+static bool ui_draw_tuning_selection(uint16_t selected_tuning, bool full_redraw)
+{
+  if (selected_tuning >= NUM_TUNINGS) {
+    return false;
+  }
+
+  if (full_redraw) {
+    if (!lcd_clear()) return false;
+    if (!lcd_draw_text(10U, 10U, "<", &Atkinson32,
+                       LCD_COLOR_WHITE, LCD_BG_COLOR)) return false;
+    if (!lcd_draw_text(65U, 10U, "Select Tuning", &Atkinson32,
+                       LCD_COLOR_WHITE, LCD_BG_COLOR)) return false;
+    if (!lcd_draw_text(LCD_WIDTH - 20U, 10U, ">", &Atkinson32,
+                       LCD_COLOR_WHITE, LCD_BG_COLOR)) return false;
+  }
+
+  if (!lcd_fill_rect(20U, 50U, LCD_WIDTH - 60U,
+                     LCD_HEIGHT - 60U, LCD_BG_COLOR)) return false;
+
+  uint16_t tuning_width =
+      ui_text_width(tunings[selected_tuning].tuning_name, &Atkinson32);
+
+  if (!lcd_draw_text((LCD_WIDTH - tuning_width) / 2U, 70U,
+                     tunings[selected_tuning].tuning_name,
+                     &Atkinson32, LCD_COLOR_WHITE, LCD_BG_COLOR)) return false;
+
+  char notes_text[64] = "";
+
+  for (uint8_t i = 0U; i < 6U; i++) {
+    strcat(notes_text, tunings[selected_tuning].notes[i].note_name);
+
+    if (i < 5U) {
+      strcat(notes_text, " ");
+    }
+  }
+
+  uint16_t notes_width = ui_text_width(notes_text, &Atkinson32);
+
+  return lcd_draw_text((LCD_WIDTH - notes_width) / 2U, 110U,
+                       notes_text, &Atkinson32,
+                       LCD_COLOR_WHITE, LCD_BG_COLOR);
+}
+
+static bool ui_draw_listen_adjust_screen(uint8_t string, bool full_redraw)
+{
+  uint8_t array_index;
+
+  if (!string_to_array_index(string, &array_index)) {
+    return false;
+  }
+
+  const note_t *note = &chosen_tuning.notes[array_index];
+  char frequency_text[16];
+  char note_name[3] = {0};
+  char octave[2] = {0};
+  size_t note_name_length = strlen(note->note_name);
+
+  if ((note_name_length < 2U) || (note_name_length > 3U)) {
+    return false;
+  }
+
+  memcpy(note_name, note->note_name, note_name_length - 1U);
+  octave[0] = note->note_name[note_name_length - 1U];
+
+  if (snprintf(frequency_text, sizeof(frequency_text),
+               "%.2f Hz", note->frequency) < 0) return false;
+
+  if (full_redraw) {
+    if (!lcd_clear()) return false;
+  }
+  else {
+    if (!lcd_fill_rect(0U, 0U, LCD_WIDTH, 60U,
+                       LCD_BG_COLOR)) return false;
+    if (!lcd_fill_rect(0U, 70U, LCD_WIDTH,
+                       LCD_HEIGHT - 70U, LCD_BG_COLOR)) return false;
+  }
+
+  uint16_t frequency_width = ui_text_width(frequency_text, &Atkinson32);
+  uint16_t note_width = ui_text_width(note_name, &Atkinson72);
+  uint16_t octave_width = ui_text_width(octave, &Atkinson48);
+  uint16_t note_x = (LCD_WIDTH - note_width - octave_width) / 2U;
+  uint16_t note_y = (LCD_HEIGHT - Atkinson72.line_height) / 2U;
+  uint16_t octave_y = note_y + Atkinson72.ascent - Atkinson48.ascent;
+
+  if (!lcd_draw_text((LCD_WIDTH - frequency_width) / 2U, 8U,
+                     frequency_text, &Atkinson32,
+                     LCD_COLOR_WHITE, LCD_BG_COLOR)) return false;
+  if (!lcd_draw_text(note_x, note_y, note_name, &Atkinson72,
+                     LCD_COLOR_WHITE, LCD_BG_COLOR)) return false;
+
+  return lcd_draw_text(note_x + note_width, octave_y, octave,
+                       &Atkinson48, LCD_COLOR_WHITE, LCD_BG_COLOR);
+}
+
+static bool ui_draw_done_screen(void)
+{
+  if (!lcd_clear()) {
+    return false;
+  }
+
+  uint16_t title_width = ui_text_width("Tuning Complete", &Atkinson32);
+  uint16_t prompt_width = ui_text_width("Press Select", &Atkinson32);
+
+  if (!lcd_draw_text((LCD_WIDTH - title_width) / 2U, 70U,
+                     "Tuning Complete", &Atkinson32,
+                     LCD_COLOR_GREEN, LCD_BG_COLOR)) return false;
+
+  return lcd_draw_text((LCD_WIDTH - prompt_width) / 2U, 120U,
+                       "Press Select", &Atkinson32,
+                       LCD_COLOR_WHITE, LCD_BG_COLOR);
+}
+
+static bool string_to_array_index(uint8_t string, uint8_t *array_index){
+	if ((array_index == NULL) || (string == 0U) || (string > 6U)){
+		return false;
+	}
+
+	*array_index = 6U - string;
+	return true;
+}
+
+static uint16_t ui_text_width(const char *text, const lcd_font_t *font)
+{
+  uint16_t width = 0U;
+
+  if ((text == NULL) || (font == NULL)) {
+    return 0U;
+  }
+
+  for (; *text != '\0'; text++) {
+    for (uint16_t glyph_idx = 0U;
+         glyph_idx < font->glyph_count;
+         glyph_idx++) {
+      if (font->glyphs[glyph_idx].codepoint == (uint8_t)*text) {
+        width += font->glyphs[glyph_idx].advance;
+        break;
+      }
+    }
+  }
+
+  return width;
+}
 
 /* USER CODE END 4 */
-
-/**
-  * @brief  Period elapsed callback in non blocking mode
-  * @note   This function is called  when TIM7 interrupt took place, inside
-  * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
-  * a global variable "uwTick" used as application time base.
-  * @param  htim : TIM handle
-  * @retval None
-  */
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
-{
-  /* USER CODE BEGIN Callback 0 */
-
-  /* USER CODE END Callback 0 */
-  if (htim->Instance == TIM7)
-  {
-    HAL_IncTick();
-  }
-  /* USER CODE BEGIN Callback 1 */
-
-  /* USER CODE END Callback 1 */
-}
 
 /**
   * @brief  This function is executed in case of error occurrence.
