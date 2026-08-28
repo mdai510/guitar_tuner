@@ -12,8 +12,6 @@
 #define MTR_TIM_CHANNEL TIM_CHANNEL_1
 
 static TIM_HandleTypeDef *mtr_tim_handle = &htim3;
-//motor direction: 1 = clockwise, 0 = counterclockwise
-static uint8_t mtr_dir = 0;
 
 /*
  * Write EN low to enable output to motor
@@ -42,5 +40,13 @@ void motor_cntrl_start(void){
  */
 void motor_cntrl_stop(void){
 	HAL_TIM_PWM_Stop(mtr_tim_handle, MTR_TIM_CHANNEL);
+}
+
+/*
+ * Set the direction of the motor
+ * dir: 1 = clockwise, 0 = counterclockwise
+ */
+void motor_cntrl_set_dir(uint8_t dir){
+	HAL_GPIO_WritePin(MotorDIR_GPIO_Port, MotorDIR_Pin, dir ? 1 : 0);
 }
 

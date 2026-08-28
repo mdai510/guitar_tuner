@@ -32,4 +32,7 @@ uint32_t microphone_take_ready_flags(void);
 /* Discard any DMA buffer completions that have not been processed yet. */
 void microphone_discard_pending(void);
 
+/* Get the current DMA half/full completion flags without clearing them. */
+uint32_t microphone_get_ready_flags(void);
+
 #endif /* INC_MICROPHONE_H_ */

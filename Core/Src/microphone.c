@@ -77,6 +77,10 @@ void microphone_discard_pending(void){
 	(void)microphone_take_ready_flags();
 }
 
+uint32_t microphone_get_ready_flags(void){
+	return mic_ready_flags;
+}
+
 /*
  * Callback function for when 1st half of buffer filled
  */
