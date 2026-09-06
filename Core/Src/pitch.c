@@ -14,10 +14,11 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <stdio.h>
 
-#define MIN_SIGNAL_LVL       55U
+#define MIN_SIGNAL_LVL       85U
 
-#define SAMPLE_RATE_HZ       8000U
+#define SAMPLE_RATE_HZ       MIC_SAMPLE_RATE_HZ
 
 #define TUNER_MIN_FREQ_HZ    60U
 #define TUNER_MAX_FREQ_HZ    400U
@@ -86,18 +87,45 @@ static float string_freq_maxs[6] = {STRING_1_MAX_HZ, STRING_2_MAX_HZ, STRING_3_M
 
 static float fft_run(uint8_t string);
 
-static void center_audio_buffer(const uint16_t *audio_buf);
-static uint32_t ave_audio_buffer(const uint16_t *audio_buf);
+static void center_audio_buffer(const int16_t *audio_buf);
+static int32_t ave_audio_buffer(const int16_t *audio_buf);
 static uint32_t ave_amplitude(void);
 
 static void initialize_hann_window(void);
 static float get_magnitude_squared(uint32_t bin);
 static float interpolate_peak_bin(uint32_t peak_bin);
 
-static int find_period_autocorrelation(const int16_t *centered_buf);
+//static int find_period_autocorrelation(const int16_t *centered_buf);
 #define PLOT_MIN_FREQ_HZ  40U
 #define PLOT_MAX_FREQ_HZ  500U
-static void print_fft_spectrum(void);
+//static void print_fft_spectrum(void);
+
+static void print_signal_levels(const int16_t *buf){
+    int16_t minimum = INT16_MAX;
+    int16_t maximum = INT16_MIN;
+    int64_t sum = 0;
+
+    for (uint32_t i = 0U; i < FFT_BUF_SIZE; i++) {
+        if (buf[i] < minimum) {
+            minimum = buf[i];
+        }
+
+        if (buf[i] > maximum) {
+            maximum = buf[i];
+        }
+
+        sum += buf[i];
+    }
+
+    int32_t mean = (int32_t)(sum / FFT_BUF_SIZE);
+    int32_t peak_to_peak = (int32_t)maximum - (int32_t)minimum;
+
+    printf("min=%d max=%d mean=%ld p2p=%ld\r\n",
+           (int)minimum,
+           (int)maximum,
+           (long)mean,
+           (long)peak_to_peak);
+}
 
 /*
  * Initialize the FFT.
@@ -127,7 +155,7 @@ bool fft_init(void){
     //since f = kFs/N --> k = fN/Fs
     min_bin = ((uint64_t)TUNER_MIN_FREQ_HZ * FFT_BUF_SIZE) / SAMPLE_RATE_HZ;
     //round the maximum bin upward so the upper frequency limit is included.
-    max_bin = ((uint64_t)TUNER_MAX_FREQ_HZ * FFT_BUF_SIZE) + (SAMPLE_RATE_HZ-1U) / SAMPLE_RATE_HZ;
+    max_bin = (uint32_t)((((uint64_t)TUNER_MAX_FREQ_HZ * FFT_BUF_SIZE) + SAMPLE_RATE_HZ - 1U) /SAMPLE_RATE_HZ);
     //bin zero is DC and should not be considered as a pitch.
     if (min_bin < 1U) min_bin = 1U;
 
@@ -178,7 +206,7 @@ void fft_deinit(void)
  *   estimated frequency in Hz
  *   0.0f if the signal is too quiet or the FFT is not initialized
  */
-float get_freq_fft(const uint16_t *audio_buf, uint8_t string){
+float get_freq_fft(const int16_t *audio_buf, uint8_t string){
     if ((audio_buf == NULL) || (fft_initialized == 0U)) return 0.0f;
     if(string > 6 || string < 1) return 0.0f;
     //to be able to index into array
@@ -187,8 +215,11 @@ float get_freq_fft(const uint16_t *audio_buf, uint8_t string){
     //convert the unsigned ADC signal into a signed, zero-centered signal.
     center_audio_buffer(audio_buf);
 
+    //print_signal_levels(audio_buf);
+
     //reject silence and low-level background noise.
     uint32_t average_amplitude = ave_amplitude();
+    printf("avg_abs=%lu\r\n", (unsigned long)average_amplitude);
     if (average_amplitude < MIN_SIGNAL_LVL) return 0.0f;
 
     return fft_run(string);
@@ -310,7 +341,7 @@ static float fft_run(uint8_t string)
 			return 0.0f;
 		}
     } */
-    float scnd_frac_bin = interpolate_peak_bin(next_best_bin);
+//    float scnd_frac_bin = interpolate_peak_bin(next_best_bin);
     //printf("2nd best: %.2f\r\n", scnd_frac_bin * bin_resolution);
 
     //Interpolate the original or halved bin to get a more accurate frequency estimate
@@ -386,40 +417,40 @@ static void initialize_hann_window(void){
 /*
  * Center the unsigned ADC frame around zero by subtracting its mean.
  */
-static void center_audio_buffer(const uint16_t *audio_buf){
-    uint32_t average = ave_audio_buffer(audio_buf);
+static void center_audio_buffer(const int16_t *audio_buf){
+    int32_t average = ave_audio_buffer(audio_buf);
 
     for (uint32_t i = 0U; i < FFT_BUF_SIZE; i++){
-        centered_audio_buf[i] = (int16_t)((int32_t)audio_buf[i] -(int32_t)average);
+        centered_audio_buf[i] = (int16_t)((int32_t)audio_buf[i] - average);
     }
 }
 
 /*
  * Calculate the average ADC value of the frame.
  */
-static uint32_t ave_audio_buffer(const uint16_t *audio_buf){
-    uint32_t sum = 0U;
+static int32_t ave_audio_buffer(const int16_t *audio_buf){
+    int64_t sum = 0;
 
     for (uint32_t i = 0U; i < FFT_BUF_SIZE; i++){
         sum += audio_buf[i];
     }
 
-    return sum / FFT_BUF_SIZE;
+    return (int32_t)(sum / (int64_t)FFT_BUF_SIZE);
 }
 
 /*
  * Calculate the mean absolute amplitude of the centered signal.
  */
 static uint32_t ave_amplitude(void){
-    uint32_t sum = 0U;
+    uint64_t sum = 0;
 
     for (uint32_t i = 0U; i < FFT_BUF_SIZE; i++){
         int32_t sample = centered_audio_buf[i];
 
         if (sample < 0) sample = -sample;
 
-        sum += (uint32_t)sample;
+        sum += sample;
     }
 
-    return sum / FFT_BUF_SIZE;
+    return (uint32_t)(sum / FFT_BUF_SIZE);
 }

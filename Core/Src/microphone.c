@@ -7,94 +7,135 @@
 
 #include "microphone.h"
 #include "main.h"
-#include "tim.h"
-#include "adc.h"
 
-static ADC_HandleTypeDef *mic_hadc;
-static uint16_t mic_adc_buf[MIC_BUF_SIZE];
+#define MIC_CHANNEL_HALFWORD_OFFSET 0U  /* Left channel */
+
+static I2S_HandleTypeDef *mic_hi2s;
+static uint16_t i2s_dma_buf[I2S_DMA_BUF_SIZE];
 static volatile uint32_t mic_ready_flags = 0U;
 
 /*
- * Initialize the microphone with the given ADC handle
+ * Initialize the microphone with the given I2S handle
  */
-void microphone_init(ADC_HandleTypeDef *hadc){
-	mic_hadc = hadc;
+void microphone_init(I2S_HandleTypeDef *hi2s){
+	mic_hi2s = hi2s;
+	mic_ready_flags = 0U;
 }
 
 /*
- * Start the DMA transfer for microphone data
+ * Start the DMA transfer for I2S mic data
+ * This I2S is configured for 24-bit data, while DMA/STM32 handles it as 16-bit half-words.
+ * INMP441 sends 24 bit signed left-aligned sample inside 32 bit slot (the lower 8 bits are padding)
+ * The DMA captures complete slot as two 16-bit half-words
+ * 
+ * I2S also has two channels, but the L/R pin is grounded so only the left on is driven by the INMP441
+ * Thus the structure of the buffer as DMA fills it is:
+ * [left sample 1 upper 16 bits, left sample 1 lower 8 bits + padding,
+ *  right sample 1 upper 16 bits (maybe junk), right sample 1 lower 8 bits + padding(maybe junk),
+ *  ...
+ * ]
+ * Since we only need the left channel, and only the upper 16 bits of each left sample
+ * we can ignore the rest of the data in the DMA buffer (each 2nd to 4th half-word of every frame)
+ *
+ * HAL_I2S_Receive_DMA() requires special handling for its Size argument
+ * in 24-bit and 32-bit I2S modes. STM32 HAL internally doubles Size
+ * because every I2S channel slot requires two 16-bit DMA transfers.
+ *
+ * I2S_DMA_BUF_SIZE is the actual number of uint16_t elements allocated
+ * in i2s_dma_buf. Therefore, Size is passed as I2S_DMA_BUF_SIZE / 2:
+ *
+ *     HAL internal transfer count
+ *         = (I2S_DMA_BUF_SIZE / 2) * 2
+ *         = I2S_DMA_BUF_SIZE halfwords
  */
-void microphone_start(void){
+bool microphone_start(void){
+	if (mic_hi2s == NULL){
+		return false;
+	}
 	microphone_discard_pending();
-	HAL_ADC_Start_DMA(mic_hadc, (uint32_t*)mic_adc_buf, MIC_BUF_SIZE);
-	// Start 8kHz timer
-	HAL_TIM_Base_Start(&htim6);
+	return (HAL_I2S_Receive_DMA(mic_hi2s, i2s_dma_buf, I2S_DMA_BUF_SIZE / 2U) == HAL_OK);
 }
 
 /*
  * Stop microphone data DMA transfers
  */
-void microphone_stop(void){
-	HAL_TIM_Base_Stop(&htim6);
-	HAL_ADC_Stop_DMA(mic_hadc);
+bool microphone_stop(void){
+	if(mic_hi2s == NULL){
+		return false;
+	}
+	HAL_StatusTypeDef status = HAL_I2S_DMAStop(mic_hi2s);
 	microphone_discard_pending();
+	return status == HAL_OK;
 }
 
 /*
- * Get mic buffer pointer
+ * Copy the requested half of the I2S DMA buffer to the destination buffer
+ * Returns true if the copy was successful, false otherwise
  */
-const uint16_t* microphone_get_buffer(void){
-	return mic_adc_buf;
+bool microphone_copy_half(uint32_t ready_flag, int16_t *destination){
+    const uint16_t *source;
+
+    if (destination == NULL) {
+        return false;
+    }
+
+    if (ready_flag == BUF_HALF_READY) {
+        source = &i2s_dma_buf[0];
+    }
+    else if (ready_flag == BUF_FULL_READY) {
+        source = &i2s_dma_buf[I2S_DMA_HALF_SIZE];
+    }
+    else {
+        return false;
+    }
+
+    for (uint32_t i = 0U; i < MIC_HALF_BUF_SIZE; i++) {
+        uint32_t index = (i * I2S_HALFWORDS_PER_FRAME) + MIC_CHANNEL_HALFWORD_OFFSET;
+        destination[i] = (int16_t)source[index];
+    }
+
+    return true;
 }
 
 /*
- * Get mic buffer length
- */
-uint32_t microphone_get_buffer_length(void){
-	return MIC_BUF_SIZE;
-}
-
-/*
- * Return and clear DMA completion flags without losing an interrupt that
- * arrives while the main loop is taking the snapshot.
+ * Atomically return and clear the DMA half/full completion flags.
  */
 uint32_t microphone_take_ready_flags(void){
-	uint32_t primask = __get_PRIMASK();
-	uint32_t ready_flags;
+    uint32_t primask = __get_PRIMASK();
+    uint32_t flags;
 
-	__disable_irq();
-	ready_flags = mic_ready_flags;
-	mic_ready_flags = 0U;
+    __disable_irq();
+    flags = mic_ready_flags;
+    mic_ready_flags = 0U;
 
-	if (primask == 0U){
-		__enable_irq();
-	}
+    if (primask == 0U){
+        __enable_irq();
+    }
 
-	return ready_flags;
+    return flags;
 }
 
+/*
+ * Discard any DMA buffer completions that have not been processed yet.
+ */
 void microphone_discard_pending(void){
 	(void)microphone_take_ready_flags();
 }
 
-uint32_t microphone_get_ready_flags(void){
-	return mic_ready_flags;
+void HAL_I2S_RxHalfCpltCallback(I2S_HandleTypeDef *hi2s){
+    if (hi2s == mic_hi2s){
+        mic_ready_flags |= BUF_HALF_READY;
+    }
 }
 
-/*
- * Callback function for when 1st half of buffer filled
- */
-void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc) {
-	if (hadc == mic_hadc){
-		mic_ready_flags |= BUF_HALF_READY;
-	}
+void HAL_I2S_RxCpltCallback(I2S_HandleTypeDef *hi2s){
+    if (hi2s == mic_hi2s){
+        mic_ready_flags |= BUF_FULL_READY;
+    }
 }
 
-/*
- * Callback function for when 2nd half of buffer filled
- */
-void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
-	if (hadc == mic_hadc){
-		mic_ready_flags |= BUF_FULL_READY;
-	}
+void HAL_I2S_ErrorCallback(I2S_HandleTypeDef *hi2s){
+    if (hi2s == mic_hi2s) {
+        /* Set a breakpoint here during initial testing. */
+    }
 }

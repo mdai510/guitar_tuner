@@ -35,6 +35,6 @@ bool fft_init(void);
 void fft_deinit(void);
 
 //float get_freq_fft(const uint16_t *audio_buf, float expected_freq);
-float get_freq_fft(const uint16_t *audio_buf, uint8_t string);
+float get_freq_fft(const int16_t *audio_buf, uint8_t string);
 
 #endif /* INC_PITCH_H_ */

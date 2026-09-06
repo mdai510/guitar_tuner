@@ -14,5 +14,6 @@ void motor_cntrl_enable(void);
 void motor_cntrl_disable(void);
 void motor_cntrl_start(void);
 void motor_cntrl_stop(void);
+void motor_cntrl_set_dir(uint8_t dir);
 
 #endif /* INC_MOTOR_CNTRL_H_ */

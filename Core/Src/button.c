@@ -29,6 +29,7 @@ bool b1_pressed_debounced(void){
 	b1_debounce_pending = false;
 	//if after debounce time, button is still low, register button press
 	if(HAL_GPIO_ReadPin(Button1_GPIO_Port, Button1_Pin) == GPIO_PIN_RESET){
+		printf("b1 press\r\n");
 		return true;
 	}
 	return false;
@@ -41,6 +42,7 @@ bool b2_pressed_debounced(void){
 
 	b2_debounce_pending = false;
 	if(HAL_GPIO_ReadPin(Button2_GPIO_Port, Button2_Pin) == GPIO_PIN_RESET){
+		printf("b2 press\r\n");
 		return true;
 	}
 	return false;
@@ -53,6 +55,7 @@ bool b3_pressed_debounced(void){
 
 	b3_debounce_pending = false;
 	if(HAL_GPIO_ReadPin(Button3_GPIO_Port, Button3_Pin) == GPIO_PIN_RESET){
+		printf("b3 press\r\n");
 		return true;
 	}
 	return false;

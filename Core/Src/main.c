@@ -18,8 +18,8 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "adc.h"
 #include "dma.h"
+#include "i2s.h"
 #include "spi.h"
 #include "tim.h"
 #include "gpio.h"
@@ -132,10 +132,10 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_DMA_Init();
-  MX_ADC1_Init();
   MX_TIM6_Init();
   MX_TIM3_Init();
   MX_SPI1_Init();
+  MX_I2S2_Init();
   /* USER CODE BEGIN 2 */
   if (!lcd_init()) {
     Error_Handler();
@@ -145,7 +145,7 @@ int main(void)
     Error_Handler();
   }
 
-  microphone_init(&hadc1);
+  microphone_init(&hi2s2);
 
   if (!fft_init()) {
     Error_Handler();
@@ -494,7 +494,8 @@ static uint16_t ui_text_width(const char *text, const lcd_font_t *font){
   * @brief  This function is executed in case of error occurrence.
   * @retval None
   */
-void Error_Handler(void){
+void Error_Handler(void)
+{
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();

@@ -5,12 +5,11 @@
  */
 
 #include "audio_processing.h"
-
 #include "microphone.h"
 #include "pitch.h"
 
 #include <math.h>
-#include <string.h>
+#include <stdbool.h>
 
 /* Maximum difference between consecutive readings considered stable. */
 #define ALLOWED_SAMPLE_VARIANCE       1.0f
@@ -18,7 +17,7 @@
 /* Number of consecutive stable readings required to accept a pitch. */
 #define NUM_SAMPLES_FOR_DETECTION     4U
 
-static uint16_t audio_buf[MIC_HALF_BUF_SIZE];
+static int16_t audio_buf[MIC_HALF_BUF_SIZE];
 static float previous_frequency = 0.0f;
 static uint8_t stable_sample_count = 0U;
 
@@ -27,8 +26,14 @@ static uint8_t stable_sample_count = 0U;
  * Copies the source buffer into the internal audio buffer,
  * computes the frequency using FFT, and updates the result struct
  */
-static void process_frame(const uint16_t *source, uint8_t string, audio_processing_result_t *result){
-	memcpy(audio_buf, source, sizeof(audio_buf));
+static bool process_frame(uint32_t ready_flag, uint8_t string, audio_processing_result_t *result){
+	/*
+	 * This copies only the selected I2S channel and converts its
+	 * 24-bit samples into signed 16-bit samples.
+	 */
+	if (!microphone_copy_half(ready_flag, audio_buf)) {
+		return false;
+	}
 
 	//get the frequency of the current audio frame
 	float frequency = get_freq_fft(audio_buf, string);
@@ -39,7 +44,7 @@ static void process_frame(const uint16_t *source, uint8_t string, audio_processi
 	if (!result->frequency_valid){
 		previous_frequency = 0.0f;
 		stable_sample_count = 0U;
-		return;
+		return true;
 	}
  
 	//either start new stable sequence or continue the current one if within allowed variance
@@ -57,6 +62,7 @@ static void process_frame(const uint16_t *source, uint8_t string, audio_processi
 		result->stable_frequency = true;
 		stable_sample_count = 0U;
 	}
+	return true;
 }
 
 /**
@@ -89,18 +95,18 @@ bool audio_process_pending(uint8_t string, audio_processing_result_t *result){
 		return false;
 	}
 
-	const uint16_t *mic_buf = microphone_get_buffer();
+	bool processed = false;
 
 	if ((ready_flags & BUF_HALF_READY) != 0U){
-		process_frame(mic_buf, string, result);
+		if(process_frame(BUF_HALF_READY, string, result)) processed = true;
 
 		if (result->stable_frequency){
 			return true;
 		}
 	}
 	if ((ready_flags & BUF_FULL_READY) != 0U){
-		process_frame(&mic_buf[MIC_HALF_BUF_SIZE], string, result);
+		if(process_frame(BUF_FULL_READY, string, result)) processed = true;
 	}
 
-	return true;
+	return processed;
 }
