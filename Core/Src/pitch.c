@@ -28,12 +28,6 @@
 #define PI_F                 3.14159265358979323846f
 #define PARABOLA_EPSILON     1.0e-12f
 
-#define FREQ_ALLOWED_ERR          10
-#define FUNDAMENTAL_HARMONIC_PERCENT_THRESHOLD 0.3
-
-#define MIN_LAG (SAMPLE_RATE_HZ / TUNER_MAX_FREQ_HZ)
-#define MAX_LAG (SAMPLE_RATE_HZ / TUNER_MIN_FREQ_HZ)
-
 /*
  * Centered time-domain samples.
  */
@@ -67,8 +61,6 @@ static void *fft_cfg_buffer = NULL;
  */
 static uint32_t min_bin = 0U;
 static uint32_t max_bin = 0U;
-static uint32_t min_str_bin = 0U;
-static uint32_t max_str_bin = 0U;
 
 /*
  * FFT bin resolution
@@ -94,38 +86,6 @@ static uint32_t ave_amplitude(void);
 static void initialize_hann_window(void);
 static float get_magnitude_squared(uint32_t bin);
 static float interpolate_peak_bin(uint32_t peak_bin);
-
-//static int find_period_autocorrelation(const int16_t *centered_buf);
-#define PLOT_MIN_FREQ_HZ  40U
-#define PLOT_MAX_FREQ_HZ  500U
-//static void print_fft_spectrum(void);
-
-static void print_signal_levels(const int16_t *buf){
-    int16_t minimum = INT16_MAX;
-    int16_t maximum = INT16_MIN;
-    int64_t sum = 0;
-
-    for (uint32_t i = 0U; i < FFT_BUF_SIZE; i++) {
-        if (buf[i] < minimum) {
-            minimum = buf[i];
-        }
-
-        if (buf[i] > maximum) {
-            maximum = buf[i];
-        }
-
-        sum += buf[i];
-    }
-
-    int32_t mean = (int32_t)(sum / FFT_BUF_SIZE);
-    int32_t peak_to_peak = (int32_t)maximum - (int32_t)minimum;
-
-    printf("min=%d max=%d mean=%ld p2p=%ld\r\n",
-           (int)minimum,
-           (int)maximum,
-           (long)mean,
-           (long)peak_to_peak);
-}
 
 /*
  * Initialize the FFT.
@@ -215,8 +175,6 @@ float get_freq_fft(const int16_t *audio_buf, uint8_t string){
     //convert the unsigned ADC signal into a signed, zero-centered signal.
     center_audio_buffer(audio_buf);
 
-    //print_signal_levels(audio_buf);
-
     //reject silence and low-level background noise.
     uint32_t average_amplitude = ave_amplitude();
     printf("avg_abs=%lu\r\n", (unsigned long)average_amplitude);
@@ -228,125 +186,54 @@ float get_freq_fft(const int16_t *audio_buf, uint8_t string){
 /*
  * Prepare and run the FFT, find the dominant peak, and return its frequency.
  */
-static float fft_run(uint8_t string)
-{
-	//apply hann window
-    for (uint32_t i = 0U; i < FFT_BUF_SIZE; i++){
-        fft_in[i] = (kiss_fft_scalar)((float)centered_audio_buf[i] * hann_window[i]);
+static float fft_run(uint8_t string){
+	// Apply the Hann window before transforming the frame.
+    for (uint32_t i = 0U; i < FFT_BUF_SIZE; i++) {
+        fft_in[i] = (kiss_fft_scalar)(
+            (float)centered_audio_buf[i] * hann_window[i]);
     }
 
-    //fft_out covers frequencies from zero to Nyquist
     kiss_fftr(fft_cfg, fft_in, fft_out);
 
-    min_str_bin = ((uint64_t)string_freq_mins[string] * FFT_BUF_SIZE) / SAMPLE_RATE_HZ;
-    max_str_bin = ((uint64_t)string_freq_maxs[string] * FFT_BUF_SIZE) / SAMPLE_RATE_HZ;
+    uint32_t search_min = (uint32_t)floorf(
+        string_freq_mins[string] / bin_resolution);
+    uint32_t search_max = (uint32_t)ceilf(
+        string_freq_maxs[string] / bin_resolution);
 
-    uint32_t best_bin = min_str_bin;
-    uint32_t next_best_bin = min_str_bin;
-    float best_magnitude_squared = get_magnitude_squared(min_str_bin);
-    float next_best_mag_sqr = best_magnitude_squared;
+    /* Include one bin outside the nominal range for edge detection. */
+    if (search_min > 1U) {
+        search_min--;
+    }
 
-    //search only the expected guitar-frequency range +- a few bins
-    for (uint32_t bin = min_str_bin - 1U; bin <= max_str_bin + 1U; bin++)
-    {
-        float magnitude_squared = get_magnitude_squared(bin);
+    uint32_t highest_safe_bin = (FFT_BUF_SIZE / 2U) - 1U;
+    if (search_max < highest_safe_bin) {
+        search_max++;
+    }
+    else {
+        search_max = highest_safe_bin;
+    }
 
-        if (magnitude_squared > best_magnitude_squared){
-        	next_best_mag_sqr = best_magnitude_squared;
-        	next_best_bin = best_bin;
-            best_magnitude_squared = magnitude_squared;
+    /* Keep DC out of the pitch search and reject an invalid range. */
+    if (search_min < 1U) {
+        search_min = 1U;
+    }
+    if ((search_min > highest_safe_bin) || (search_min > search_max)) {
+        return 0.0f;
+    }
+
+    uint32_t best_bin = search_min;
+    float best_power = get_magnitude_squared(best_bin);
+
+    for (uint32_t bin = search_min + 1U; bin <= search_max; bin++) {
+        float power = get_magnitude_squared(bin);
+
+        if (power > best_power) {
+            best_power = power;
             best_bin = bin;
-
-        }
-        else if(magnitude_squared > next_best_mag_sqr && magnitude_squared < best_magnitude_squared){
-        	next_best_mag_sqr = magnitude_squared;
-        	next_best_bin = bin;
         }
     }
 
-    //If best bin is +- FREQ_ALLOWED_ERR of the expected frequency, interpolate and return the frequency
-    //If not, check the half frequency (best_bin / 2) and the bins around it
-    //If there is a peak there that is above <threshold> percent of the best bin, return that frequency instead
-    //If that is still not within the expected range, return 0.0f
-    /*
-    float best_freq = (float)best_bin * bin_resolution;
-    printf("best freq: %f\r\n", best_freq);
-    //check if outside expected range
-    if((best_freq < expected_freq - FREQ_ALLOWED_ERR) || (best_freq > expected_freq + FREQ_ALLOWED_ERR)){
-    	uint32_t half_bin = best_bin / 2U;
-
-		uint32_t error_bins =
-			(uint32_t)ceilf(
-				(float)FREQ_ALLOWED_ERR / bin_resolution
-			);
-
-		uint32_t half_min_bin =
-			(half_bin > error_bins)
-				? half_bin - error_bins
-				: 1U;
-
-		uint32_t half_max_bin = half_bin + error_bins;
-
-		/*
-		 * Keep the temporary search inside the permanent
-		 * tuner frequency range.
-		 */
-         /*
-		if (half_min_bin < min_bin)
-		{
-			half_min_bin = min_bin;
-		}
-
-		if (half_max_bin > max_bin)
-		{
-			half_max_bin = max_bin;
-		}
-
-		/*
-		 * If the half-frequency region is below the supported
-		 * tuner range, reject it.
-		 */
-         /*
-		if (half_min_bin > half_max_bin)
-		{
-			return 0.0f;
-		}
-
-		uint32_t fundamental_bin = half_min_bin;
-		float fundamental_mag_squared =
-			get_magnitude_squared(fundamental_bin);
-
-		for (uint32_t bin = half_min_bin + 1U;
-			 bin <= half_max_bin;
-			 bin++)
-		{
-			float magnitude_squared =
-				get_magnitude_squared(bin);
-
-			if (magnitude_squared > fundamental_mag_squared)
-			{
-				fundamental_mag_squared = magnitude_squared;
-				fundamental_bin = bin;
-			}
-		}
-
-		if (fundamental_mag_squared >
-			best_magnitude_squared *
-			FUNDAMENTAL_HARMONIC_PERCENT_THRESHOLD)
-		{
-			best_bin = fundamental_bin;
-		}
-		else
-		{
-			return 0.0f;
-		}
-    } */
-//    float scnd_frac_bin = interpolate_peak_bin(next_best_bin);
-    //printf("2nd best: %.2f\r\n", scnd_frac_bin * bin_resolution);
-
-    //Interpolate the original or halved bin to get a more accurate frequency estimate
     float fractional_bin = interpolate_peak_bin(best_bin);
-
     return fractional_bin * bin_resolution;
 }
 
@@ -374,33 +261,28 @@ static float interpolate_peak_bin(uint32_t peak_bin){
      * The bins on both sides must exist and should be inside the search
      * region.
      */
-    if ((peak_bin <= min_bin) || (peak_bin >= max_bin)){
-        return (float)peak_bin;
-    }
+	if ((peak_bin == 0U) || (peak_bin >= (FFT_BUF_SIZE / 2U))){
+		return (float)peak_bin;
+	}
 
-    float left = get_magnitude_squared(peak_bin - 1U);
-    float center = get_magnitude_squared(peak_bin);
-    float right = get_magnitude_squared(peak_bin + 1U);
+    // Convert the magnitudes of the peak bin and its neighbors to the logarithmic scale for interpolation.
+	float left = logf(get_magnitude_squared(peak_bin - 1U) + PARABOLA_EPSILON);
+	float center = logf(get_magnitude_squared(peak_bin) + PARABOLA_EPSILON);
+	float right = logf(get_magnitude_squared(peak_bin + 1U) + PARABOLA_EPSILON);
 
-    float denominator = left - (2.0f * center) + right;
+    // Calculate the denominator of the parabolic interpolation formula.
+	float denominator = left - (2.0f * center) + right;
+    // If the denominator is too small, the interpolation would be unreliable.
+	if(fabsf(denominator) < PARABOLA_EPSILON){
+		return (float)peak_bin;
+	}
 
-    if (fabsf(denominator) < PARABOLA_EPSILON){
-        return (float)peak_bin;
-    }
+    // Calculate the offset of the peak within the bin using parabolic interpolation.
+	float offset = 0.5f * (left - right) / denominator;
+	if (offset > 0.5f) offset = 0.5f;
+	else if (offset < -0.5f) offset = -0.5f;
 
-    float offset = 0.5f * (left - right) / denominator;
-
-    /*
-     * A valid local parabolic estimate should not move more than half a bin.
-     */
-    if (offset > 0.5f){
-        offset = 0.5f;
-    }
-    else if (offset < -0.5f){
-        offset = -0.5f;
-    }
-
-    return (float)peak_bin + offset;
+	return (float)peak_bin + offset;
 }
 
 /*
