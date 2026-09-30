@@ -18,8 +18,8 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "adc.h"
 #include "dma.h"
-#include "i2s.h"
 #include "spi.h"
 #include "tim.h"
 #include "gpio.h"
@@ -63,6 +63,11 @@ typedef enum {
 /* USER CODE BEGIN PD */
 #define FREQ_ALLOWED_DELTA_HZ 1.0f 
 
+#define NOTE_ROW_GAP_PX 10U
+#define UI_CENTER_MARGIN_PX 8U
+#define SHARP_OVERLAP_PX 2U
+#define SHARP_LOWER_PX 6U
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -92,6 +97,14 @@ static bool ui_draw_listen_adjust_screen(uint8_t string, bool full_redraw);
 static bool ui_draw_done_screen(void);
 static uint8_t string_to_array_index(uint8_t string);
 static uint16_t ui_text_width(const char *text, const lcd_font_t *font);
+static void ui_note_letter(uint8_t array_index, char *out);
+static uint16_t ui_tuning_color_for_string(uint8_t string, uint8_t current_string);
+static void ui_layout_tuning_notes(void);
+static bool ui_draw_tuning_note(uint8_t array_index, uint8_t current_string);
+static uint16_t ui_centered_x(uint16_t text_width);
+static uint16_t ui_glyph_advance(const lcd_font_t *font, uint8_t codepoint);
+static uint16_t ui_note_name_width(const char *text, const lcd_font_t *font, bool use_tiny_sharp);
+static bool ui_draw_note_name(uint16_t x, uint16_t y, const char *text, const lcd_font_t *font, uint16_t color, bool use_tiny_sharp);
 
 /* USER CODE END PFP */
 
@@ -135,7 +148,7 @@ int main(void)
   MX_TIM6_Init();
   MX_TIM3_Init();
   MX_SPI1_Init();
-  MX_I2S2_Init();
+  MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
   if (!lcd_init()) {
     Error_Handler();
@@ -145,7 +158,9 @@ int main(void)
     Error_Handler();
   }
 
-  microphone_init(&hi2s2);
+  if(!microphone_init(&hadc1)) {
+    Error_Handler();
+  }
 
   if (!fft_init()) {
     Error_Handler();
@@ -364,26 +379,33 @@ static bool ui_draw_tuning_selection(uint16_t selected_tuning, bool full_redraw)
 						   LCD_COLOR_WHITE, LCD_BG_COLOR)) return false;
 	}
 
-	if (!lcd_fill_rect(20U, 50U, LCD_WIDTH - 60U, LCD_HEIGHT - 60U, LCD_BG_COLOR)) return false;
+	/* Clear the full row width: a previous, wider tuning's text can extend past a narrower box. */
+	if (!lcd_fill_rect(0U, 50U, LCD_WIDTH, LCD_HEIGHT - 60U, LCD_BG_COLOR)) return false;
 
 	uint16_t tuning_width = ui_text_width(tunings[selected_tuning].tuning_name, &Atkinson32);
 
-	if (!lcd_draw_text((LCD_WIDTH - tuning_width) / 2U, 70U,
+	if (!lcd_draw_text(ui_centered_x(tuning_width), 70U,
 					 tunings[selected_tuning].tuning_name,
 					 &Atkinson32, LCD_COLOR_WHITE, LCD_BG_COLOR)) return false;
 
-	char notes_text[64] = "";
+	const note_t *notes = tunings[selected_tuning].notes;
+	uint16_t note_widths[6];
+	uint16_t total_width = 0U;
 
 	for (uint8_t i = 0U; i < 6U; i++) {
-		strcat(notes_text, tunings[selected_tuning].notes[i].note_name);
-		if (i < 5U) strcat(notes_text, " ");
+		note_widths[i] = ui_note_name_width(notes[i].note_name, &Atkinson28, true);
+		total_width += note_widths[i];
+		if (i < 5U) total_width += NOTE_ROW_GAP_PX;
 	}
 
-	uint16_t notes_width = ui_text_width(notes_text, &Atkinson32);
+	uint16_t cursor_x = ui_centered_x(total_width);
 
-	return lcd_draw_text((LCD_WIDTH - notes_width) / 2U, 110U,
-					   notes_text, &Atkinson32,
-					   LCD_COLOR_WHITE, LCD_BG_COLOR);
+	for (uint8_t i = 0U; i < 6U; i++) {
+		if (!ui_draw_note_name(cursor_x, 110U, notes[i].note_name, &Atkinson28, LCD_COLOR_WHITE, true)) return false;
+		cursor_x += note_widths[i] + NOTE_ROW_GAP_PX;
+	}
+
+	return true;
 }
 
 static bool ui_draw_listen_adjust_screen(uint8_t string, bool full_redraw){
@@ -393,14 +415,16 @@ static bool ui_draw_listen_adjust_screen(uint8_t string, bool full_redraw){
 	const note_t *note = &chosen_tuning.notes[array_index];
 	char string_text[12];
 	char frequency_text[16];
-	char note_name[3] = {0};
+	char note_letter[2] = {0};
 	char octave[2] = {0};
-	char tuning_notes[13] = {0};
 	size_t note_name_length = strlen(note->note_name);
 
 	if ((note_name_length < 2U) || (note_name_length > 3U)) return false;
 
-	memcpy(note_name, note->note_name, note_name_length - 1U);
+	/* A 3-char note name is letter + '#' + octave digit, e.g. "D#2". */
+	bool has_sharp = (note_name_length == 3U);
+
+	note_letter[0] = note->note_name[0];
 	octave[0] = note->note_name[note_name_length - 1U];
 
 	if (snprintf(string_text, sizeof(string_text), "String %u",
@@ -408,45 +432,47 @@ static bool ui_draw_listen_adjust_screen(uint8_t string, bool full_redraw){
 	if (snprintf(frequency_text, sizeof(frequency_text),
 			   "%.2f Hz", note->frequency) < 0) return false;
 
-	for (uint8_t note_index = 0U; note_index < 6U; note_index++) {
-		const char *tuning_note = chosen_tuning.notes[note_index].note_name;
-		size_t tuning_note_length = strlen(tuning_note);
-
-		if ((tuning_note_length < 2U) || (tuning_note_length > 3U)) return false;
-		strncat(tuning_notes, tuning_note, tuning_note_length - 1U);
-	}
-
 	if (full_redraw) {
 		if (!lcd_clear()) return false;
 
-		uint16_t tuning_notes_width = ui_text_width(tuning_notes, &Atkinson32);
+		ui_layout_tuning_notes();
 
-		if (!lcd_draw_text(8U, 194U, chosen_tuning.tuning_name,
-						   &Atkinson32, LCD_COLOR_WHITE,
-						   LCD_BG_COLOR)) return false;
-		if (!lcd_draw_text(LCD_WIDTH - tuning_notes_width - 8U, 194U,
-						   tuning_notes, &Atkinson32, LCD_COLOR_WHITE,
-						   LCD_BG_COLOR)) return false;
+		for (uint8_t note_index = 0U; note_index < 6U; note_index++) {
+			if (!ui_draw_tuning_note(note_index, string)) return false;
+		}
 	}
 	else {
 		if (!lcd_fill_rect(0U, 0U, LCD_WIDTH, 180U, LCD_BG_COLOR)) return false;
+
+		/* Only the string that just finished and the newly current string change color. */
+		if (string < 6U) {
+			if (!ui_draw_tuning_note(string_to_array_index(string + 1U), string)) return false;
+		}
+		if (!ui_draw_tuning_note(array_index, string)) return false;
 	}
+
 
 	uint16_t string_width = ui_text_width(string_text, &Atkinson32);
 	uint16_t frequency_width = ui_text_width(frequency_text, &Atkinson32);
-	uint16_t note_width = ui_text_width(note_name, &Atkinson72);
-	uint16_t octave_width = ui_text_width(octave, &Atkinson48);
-	uint16_t note_x = (LCD_WIDTH - note_width - octave_width) / 2U;
+	uint16_t note_width = ui_text_width(note_letter, &Atkinson72);
+
+	/* Sharp and octave share the same font/baseline, so measure and draw them as one string. */
+	char accidental_text[3] = {0};
+	if (has_sharp) accidental_text[0] = '#';
+	accidental_text[has_sharp ? 1U : 0U] = octave[0];
+
+	uint16_t accidental_width = ui_text_width(accidental_text, &Atkinson32);
+	uint16_t note_x = (LCD_WIDTH - note_width - accidental_width) / 2U;
 	uint16_t note_y = 38U;
-	uint16_t octave_y = note_y + Atkinson72.ascent - Atkinson48.ascent;
+	uint16_t accidental_y = note_y + Atkinson72.ascent - Atkinson32.ascent;
 
 	if (!lcd_draw_text((LCD_WIDTH - string_width) / 2U, 4U,
 					 string_text, &Atkinson32,
 					 LCD_COLOR_WHITE, LCD_BG_COLOR)) return false;
-	if (!lcd_draw_text(note_x, note_y, note_name, &Atkinson72,
+	if (!lcd_draw_text(note_x, note_y, note_letter, &Atkinson72,
 					 LCD_COLOR_WHITE, LCD_BG_COLOR)) return false;
-	if (!lcd_draw_text(note_x + note_width, octave_y, octave,
-					 &Atkinson48, LCD_COLOR_WHITE, LCD_BG_COLOR)) return false;
+	if (!lcd_draw_text(note_x + note_width, accidental_y, accidental_text,
+					 &Atkinson32, LCD_COLOR_WHITE, LCD_BG_COLOR)) return false;
 
 	return lcd_draw_text((LCD_WIDTH - frequency_width) / 2U, 128U,
 					   frequency_text, &Atkinson32,
@@ -472,20 +498,121 @@ static uint8_t string_to_array_index(uint8_t string){
 	return 6U - string;
 }
 
+/* x position of each note's colored letter in the listen screen's note row, indexed by array_index. */
+static uint16_t tuning_note_x[6];
+
+/* Copies a note's letter (name minus trailing octave digit) into out, which must hold >= 3 bytes. */
+static void ui_note_letter(uint8_t array_index, char *out){
+	const char *note_name = chosen_tuning.notes[array_index].note_name;
+	size_t len = strlen(note_name);
+
+	memcpy(out, note_name, len - 1U);
+	out[len - 1U] = '\0';
+}
+
+static uint16_t ui_tuning_color_for_string(uint8_t string, uint8_t current_string){
+	if (string > current_string) return LCD_COLOR_GREEN;
+	if (string == current_string) return LCD_COLOR_WHITE;
+	return LCD_COLOR_RED;
+}
+
+static void ui_layout_tuning_notes(void){
+	char letters[6][3];
+	uint16_t widths[6];
+	uint16_t total_width = 0U;
+
+	for (uint8_t i = 0U; i < 6U; i++) {
+		ui_note_letter(i, letters[i]);
+		widths[i] = ui_note_name_width(letters[i], &Atkinson32, false);
+		total_width += widths[i];
+		if (i < 5U) total_width += NOTE_ROW_GAP_PX;
+	}
+
+	uint16_t cursor_x = ui_centered_x(total_width);
+
+	for (uint8_t i = 0U; i < 6U; i++) {
+		tuning_note_x[i] = cursor_x;
+		cursor_x += widths[i] + NOTE_ROW_GAP_PX;
+	}
+}
+
+static bool ui_draw_tuning_note(uint8_t array_index, uint8_t current_string){
+	char letter[3];
+	uint8_t string = 6U - array_index;
+	uint16_t color = ui_tuning_color_for_string(string, current_string);
+
+	ui_note_letter(array_index, letter);
+
+	return ui_draw_note_name(tuning_note_x[array_index], 180U, letter, &Atkinson32, color, false);
+}
+
 static uint16_t ui_text_width(const char *text, const lcd_font_t *font){
 	uint16_t width = 0U;
 	if ((text == NULL) || (font == NULL)) return 0U;
 
 	for(; *text != '\0'; text++){
-		for(uint16_t glyph_idx = 0U; glyph_idx < font->glyph_count; glyph_idx++){
-			if(font->glyphs[glyph_idx].codepoint == (uint8_t)*text){
-				width += font->glyphs[glyph_idx].advance;
-				break;
-			}
-		}
+		width += ui_glyph_advance(font, (uint8_t)*text);
 	}
 
 	return width;
+}
+
+/* Returns 0 if the text fits centered normally, else clamps to a small margin instead of underflowing. */
+static uint16_t ui_centered_x(uint16_t text_width){
+	return (text_width + (2U * UI_CENTER_MARGIN_PX) < LCD_WIDTH)
+		? (LCD_WIDTH - text_width) / 2U
+		: UI_CENTER_MARGIN_PX;
+}
+
+static uint16_t ui_glyph_advance(const lcd_font_t *font, uint8_t codepoint){
+	for (uint16_t glyph_idx = 0U; glyph_idx < font->glyph_count; glyph_idx++){
+		if (font->glyphs[glyph_idx].codepoint == codepoint){
+			return font->glyphs[glyph_idx].advance;
+		}
+	}
+
+	return 0U;
+}
+
+/* '#' reserves less cursor space than its glyph width so it overlaps back into the preceding letter. */
+static uint16_t ui_note_char_advance(const lcd_font_t *font, char c, bool use_tiny_sharp){
+	if (use_tiny_sharp && (c == '#')){
+		uint16_t advance = ui_glyph_advance(&Atkinson15, (uint8_t)c);
+		return (advance > SHARP_OVERLAP_PX) ? (advance - SHARP_OVERLAP_PX) : 0U;
+	}
+
+	return ui_glyph_advance(font, (uint8_t)c);
+}
+
+static uint16_t ui_note_name_width(const char *text, const lcd_font_t *font, bool use_tiny_sharp){
+	uint16_t width = 0U;
+	if ((text == NULL) || (font == NULL)) return 0U;
+
+	for (; *text != '\0'; text++){
+		width += ui_note_char_advance(font, *text, use_tiny_sharp);
+	}
+
+	return width;
+}
+
+static bool ui_draw_note_name(uint16_t x, uint16_t y, const char *text, const lcd_font_t *font, uint16_t color, bool use_tiny_sharp){
+	uint16_t cursor_x = x;
+	if ((text == NULL) || (font == NULL)) return false;
+
+	for (; *text != '\0'; text++){
+		if (use_tiny_sharp && (*text == '#')) {
+			uint16_t sharp_y = y + font->ascent - Atkinson15.ascent + SHARP_LOWER_PX;
+			uint16_t sharp_x = (cursor_x > SHARP_OVERLAP_PX) ? (cursor_x - SHARP_OVERLAP_PX) : 0U;
+
+			if (!lcd_draw_codepoint(sharp_x, sharp_y, (uint8_t)*text, &Atkinson15, color, LCD_BG_COLOR)) return false;
+		}
+		else {
+			if (!lcd_draw_codepoint(cursor_x, y, (uint8_t)*text, font, color, LCD_BG_COLOR)) return false;
+		}
+		cursor_x += ui_note_char_advance(font, *text, use_tiny_sharp);
+	}
+
+	return true;
 }
 
 /* USER CODE END 4 */

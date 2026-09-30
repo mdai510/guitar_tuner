@@ -32,8 +32,9 @@ typedef struct {
     uint16_t ascent;
 } lcd_font_t;
 
+extern const lcd_font_t Atkinson15;
+extern const lcd_font_t Atkinson28;
 extern const lcd_font_t Atkinson32;
-extern const lcd_font_t Atkinson48;
 extern const lcd_font_t Atkinson72;
 
 #endif /* INC_FONTS_H_ */

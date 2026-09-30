@@ -16,11 +16,11 @@
 #include <sys/stat.h>
 #include <stdio.h>
 
-#define MIN_SIGNAL_LVL       85U
+#define MIN_SIGNAL_LVL       40U
 
 #define SAMPLE_RATE_HZ       MIC_SAMPLE_RATE_HZ
 
-#define TUNER_MIN_FREQ_HZ    60U
+#define TUNER_MIN_FREQ_HZ    50U
 #define TUNER_MAX_FREQ_HZ    400U
 
 #define FFT_BUF_SIZE         MIC_HALF_BUF_SIZE

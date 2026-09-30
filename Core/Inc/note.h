@@ -98,12 +98,16 @@ typedef struct{
 	note_t notes[6];
 } tuning_t;
 
-#define NUM_TUNINGS 3U
+#define NUM_TUNINGS 7U
 
 static const tuning_t tunings[NUM_TUNINGS] = {
 		{.tuning_name = "E Standard", .notes = {e2, a2, d3, g3, b3, e4}},
 		{.tuning_name = "Drop D", .notes = {d2, a2, d3, g3, b3, e4}},
-		{.tuning_name = "D Standard", .notes = {d2, g2, c3, f3, a3, d4}}
+		{.tuning_name = "D Standard", .notes = {d2, g2, c3, f3, a3, d4}},
+		{.tuning_name = "Open G", .notes = {d2, g2, d3, g3, b3, d4}},
+		{.tuning_name = "Open D", .notes = {d2, a2, d3, fs3, a3, d4}},
+		{.tuning_name = "Half Step Down", .notes = {ds2, gs2, cs3, fs3, as3, ds4}},
+		{.tuning_name = "Whole Step Down", .notes = {d2, g2, c3, f3, a3, d4}}
 };
 
 #endif /* INC_NOTE_H_ */
