@@ -46,6 +46,7 @@ typedef enum {
   STATE_TUNING_SELECT,
   STATE_LISTEN,
   STATE_ADJUST,
+  STATE_SETTLE,
   STATE_DONE
 } state_t;
 
@@ -61,7 +62,13 @@ typedef enum {
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define FREQ_ALLOWED_DELTA_HZ 1.0f 
+#define FREQ_ALLOWED_DELTA_HZ 1.0f
+
+#define MOTOR_SETTLE_TIME_MS 150U
+#define TUNING_TOLERANCE_CENTS 5.0f
+
+#define MOTOR_DIR_TIGHTEN 0U
+#define MOTOR_DIR_LOOSEN 1U
 
 #define NOTE_ROW_GAP_PX 10U
 #define UI_CENTER_MARGIN_PX 8U
@@ -83,15 +90,18 @@ COM_InitTypeDef BspCOMInit;
 static uint8_t tuning_idx = 0U;
 static tuning_t chosen_tuning;
 static uint8_t current_string = 6U;
-static float freq_adjust_delta = 0.0f;
 static uint32_t ui_state = UI_DIRTY_FULL; 
 static uint32_t last_ui_update = 0U;
+
+static uint32_t motor_settle_start = 0U;
 
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
+static uint32_t choose_motor_steps(float absolute_error_cents);
+static float frequency_error_cents(float measured_hz, float target_hz);
 static bool ui_draw_tuning_selection(uint16_t selected_tuning, bool full_redraw);
 static bool ui_draw_listen_adjust_screen(uint8_t string, bool full_redraw);
 static bool ui_draw_done_screen(void);
@@ -166,6 +176,8 @@ int main(void)
     Error_Handler();
   }
 
+  motor_cntrl_init();
+
   audio_processing_reset();
 
   /* USER CODE END 2 */
@@ -210,48 +222,61 @@ int main(void)
         break;
 
       case STATE_LISTEN:
-        if (audio_process_pending(current_string, &audio_result)) {
-          if (audio_result.frequency_valid) printf("Frequency: %.2f Hz\r\n", audio_result.frequency_hz);
-          if (audio_result.stable_frequency) {
-            printf("string %u detected: %.2f Hz\r\n", (unsigned int)current_string, audio_result.frequency_hz);
+    	  if (audio_process_pending(current_string, &audio_result)) {
+			  if (audio_result.frequency_valid) printf("Frequency: %.2f Hz\r\n", audio_result.frequency_hz);
+			  if (audio_result.stable_frequency) {
+				  printf("string %u detected: %.2f Hz\r\n", (unsigned int)current_string, audio_result.frequency_hz);
 
-            //if frequency is close enough to the target, move to the next string
-            if (fabsf(audio_result.frequency_hz - chosen_tuning.notes[string_to_array_index(current_string)].frequency) <= FREQ_ALLOWED_DELTA_HZ) {
-              printf("String %u in tune: %.2f Hz\r\n", (unsigned int)current_string, audio_result.frequency_hz);
-              freq_adjust_delta = 0.0f;
-              if (current_string <= 1U) {
-                microphone_stop();
-                state = STATE_DONE;
-                ui_state = UI_DIRTY_FULL;
-              }
-              else {
-                current_string--;
-                audio_processing_reset();
-                ui_state |= UI_DIRTY_STRING;
-              }
-            }
-            //else record the current frequency and then adjust based on it
-            else{
-              printf("String %u out of tune. Heard: %.2f Hz, Actual: %.2f Hz\r\n", 
-                (unsigned int)current_string, audio_result.frequency_hz, chosen_tuning.notes[string_to_array_index(current_string)].frequency);
-              freq_adjust_delta = chosen_tuning.notes[string_to_array_index(current_string)].frequency 
-                - audio_result.frequency_hz;
-              //state = STATE_ADJUST;
-              //UI may or may not change (decide later)
-            }
-          }
+				  float error_cents = frequency_error_cents(audio_result.frequency_hz, chosen_tuning.notes[string_to_array_index(current_string)].frequency);
+
+				  //if frequency is close enough to the target, move to the next string
+				  if (fabsf(error_cents) <= TUNING_TOLERANCE_CENTS) {
+					  printf("String %u in tune: %.2f Hz\r\n", (unsigned int)current_string, audio_result.frequency_hz);
+					  if (current_string <= 1U) {
+						  microphone_stop();
+						  state = STATE_DONE;
+						  ui_state = UI_DIRTY_FULL;
+					  }
+					  else {
+						  current_string--;
+						  audio_processing_reset();
+						  ui_state |= UI_DIRTY_STRING;
+					  }
+				  }
+				  //else record the current frequency and then adjust based on it
+				  else{
+					  printf("String %u out of tune. Cents of error: %.2f\r\n", (unsigned int)current_string, error_cents);
+					  uint8_t direction = (error_cents < 0.0f) ? MOTOR_DIR_TIGHTEN : MOTOR_DIR_LOOSEN;
+					  microphone_stop();
+					  audio_processing_reset();
+					  uint32_t steps = choose_motor_steps(fabsf(error_cents));
+					  if(motor_cntrl_move_steps(direction, steps)){
+						  state = STATE_ADJUST;
+					  }
+					  else{
+						  //failed to start motor so resume listening
+						  microphone_start();
+					  }
+					  //UI may or may not change (decide later)
+				  }
+			  }
         }
         break;
 
       case STATE_ADJUST:
-        if (freq_adjust_delta > 0.0f){
-          motor_cntrl_set_dir(1); // clockwise
+        if(!motor_cntrl_is_busy()){
+        	motor_settle_start = HAL_GetTick();
+        	state = STATE_SETTLE;
         }
-        else if (freq_adjust_delta < 0.0f) {
-          motor_cntrl_set_dir(0); // counterclockwise
-        }
-        //convert frequency difference to motor steps
         break;
+
+      case STATE_SETTLE:
+    	  if((HAL_GetTick() - motor_settle_start) >= MOTOR_SETTLE_TIME_MS){
+    		  audio_processing_reset();
+    		  microphone_start();
+    		  state = STATE_LISTEN;
+    	  }
+    	  break;
 
       case STATE_DONE:
         if (b1_pressed_debounced()) {
@@ -366,6 +391,27 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+//temp adjustment steps for now
+static uint32_t choose_motor_steps(float absolute_error_cents){
+  if (absolute_error_cents > 50.0f) {
+    return 40U;
+  }
+
+  if (absolute_error_cents > 20.0f) {
+    return 20U;
+  }
+
+  if (absolute_error_cents > 8.0f) {
+    return 8U;
+  }
+
+  return 3U;
+}
+
+static float frequency_error_cents(float measured_hz, float target_hz){
+  return 1200.0f * log2f(measured_hz / target_hz);
+} 
+
 static bool ui_draw_tuning_selection(uint16_t selected_tuning, bool full_redraw){
 	if (selected_tuning >= NUM_TUNINGS) return false;
 

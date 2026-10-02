@@ -8,12 +8,14 @@
 #ifndef INC_MOTOR_CNTRL_H_
 #define INC_MOTOR_CNTRL_H_
 
-#include "tim.h"
+#include <stdbool.h>
+#include <stdint.h>
 
-void motor_cntrl_enable(void);
-void motor_cntrl_disable(void);
-void motor_cntrl_start(void);
-void motor_cntrl_stop(void);
-void motor_cntrl_set_dir(uint8_t dir);
+void motor_cntrl_init(void);
+
+bool motor_cntrl_move_steps(uint8_t direction, uint32_t steps);
+
+bool motor_cntrl_is_busy(void);
+void motor_cntrl_abort(void);
 
 #endif /* INC_MOTOR_CNTRL_H_ */

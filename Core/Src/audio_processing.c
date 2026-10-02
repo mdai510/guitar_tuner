@@ -15,11 +15,38 @@
 #define ALLOWED_SAMPLE_VARIANCE       1.0f
 
 /* Number of consecutive stable readings required to accept a pitch. */
-#define NUM_SAMPLES_FOR_DETECTION     4U
+#define NUM_SAMPLES_FOR_DETECTION     2U
+#define MEDIAN_WINDOW_SIZE 3U
 
 static int16_t audio_buf[MIC_HALF_BUF_SIZE];
 static float previous_frequency = 0.0f;
 static uint8_t stable_sample_count = 0U;
+
+static float frequency_history[MEDIAN_WINDOW_SIZE];
+static uint8_t frequency_history_count = 0U;
+static uint8_t frequency_history_index = 0U;
+
+static float median_of_three(float a, float b, float c){
+    if (a > b){
+        float temp = a;
+        a = b;
+        b = temp;
+    }
+
+    if (b > c){
+        float temp = b;
+        b = c;
+        c = temp;
+    }
+
+    if (a > b){
+        float temp = a;
+        a = b;
+        b = temp;
+    }
+
+    return b;
+}
 
 /*
  * Process a single frame of audio data.
@@ -37,31 +64,44 @@ static bool process_frame(uint32_t ready_flag, uint8_t string, audio_processing_
 
 	//get the frequency of the current audio frame
 	float frequency = get_freq_fft(audio_buf, string);
+
 	result->frequency_hz = frequency;
 	result->frequency_valid = frequency > 0.0f;
-
-	//if the frequency is not valid, reset the previous frequency and stable sample count
-	if (!result->frequency_valid){
+	if(frequency <= 0.0f){
 		previous_frequency = 0.0f;
 		stable_sample_count = 0U;
+		frequency_history_count = 0U;
+		frequency_history_index = 0U;
+
 		return true;
 	}
- 
-	//either start new stable sequence or continue the current one if within allowed variance
-	if ((stable_sample_count == 0U) || (fabsf(frequency - previous_frequency) <= ALLOWED_SAMPLE_VARIANCE)){
+
+	frequency_history[frequency_history_index] = frequency;
+	frequency_history_index = (frequency_history_index + 1U) % MEDIAN_WINDOW_SIZE;
+	if (frequency_history_count < MEDIAN_WINDOW_SIZE) {
+		frequency_history_count++;
+	}
+
+	//Wait for three valid readings before allowing a stable/motor-control result.
+	if (frequency_history_count < MEDIAN_WINDOW_SIZE) return true;
+
+	float filtered_frequency = median_of_three(frequency_history[0],frequency_history[1],frequency_history[2]);
+	result->frequency_hz = filtered_frequency;
+
+	if ((stable_sample_count == 0U) || (fabsf(filtered_frequency - previous_frequency) <= ALLOWED_SAMPLE_VARIANCE)){
 		stable_sample_count++;
 	}
 	else{
 		stable_sample_count = 1U;
 	}
 
-	previous_frequency = frequency;
+	previous_frequency = filtered_frequency;
 
-	//check if the current sequence of stable samples is long enough to consider the frequency stable
 	if (stable_sample_count >= NUM_SAMPLES_FOR_DETECTION){
 		result->stable_frequency = true;
 		stable_sample_count = 0U;
 	}
+
 	return true;
 }
 
@@ -73,6 +113,14 @@ static bool process_frame(uint32_t ready_flag, uint8_t string, audio_processing_
 void audio_processing_reset(void){
 	previous_frequency = 0.0f;
 	stable_sample_count = 0U;
+
+	frequency_history_count = 0U;
+	frequency_history_index = 0U;
+
+	for (uint32_t i = 0U; i < MEDIAN_WINDOW_SIZE; i++){
+		frequency_history[i] = 0.0f;
+	}
+
 	microphone_discard_pending();
 }
 
