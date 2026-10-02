@@ -11,12 +11,11 @@ Operation:
 - Once tuning of all strings is done, user may select another tuning and tune again  
 
 Implementation Details: 
-- Piezo is sampled with ADC and transfered to memory with DMA  
+- Piezo biased at 1.65V and buffered with op-amp circuit  
+- Piezo sampled with ADC and transfered to memory with DMA  
 - Frequency spectrum calculated with KissFFT, along with peak bin interpolation for accurate frequency measurements (bin spacing is around 3.9Hz so interpolation helps estimate within a couple of Hz)
-
 - LCD interfaced with SPI; created custom lightweight renderer allowing glyph/text display  
 - UI draws are handled with dirty bits within the state machine, to avoid redrawing unchanged UI elements
-
 - System control also handled with separate state machine
 
 Pics:  
