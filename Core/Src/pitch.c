@@ -16,11 +16,11 @@
 #include <sys/stat.h>
 #include <stdio.h>
 
-#define MIN_SIGNAL_LVL       40U
+#define MIN_SIGNAL_LVL       120U
 
 #define SAMPLE_RATE_HZ       MIC_SAMPLE_RATE_HZ
 
-#define TUNER_MIN_FREQ_HZ    50U
+#define TUNER_MIN_FREQ_HZ    55U
 #define TUNER_MAX_FREQ_HZ    400U
 
 #define FFT_BUF_SIZE         MIC_HALF_BUF_SIZE
@@ -177,7 +177,7 @@ float get_freq_fft(const int16_t *audio_buf, uint8_t string){
 
     //reject silence and low-level background noise.
     uint32_t average_amplitude = ave_amplitude();
-    printf("avg_abs=%lu\r\n", (unsigned long)average_amplitude);
+    printf("avg_amplitude=%lu\r\n", (unsigned long)average_amplitude);
     if (average_amplitude < MIN_SIGNAL_LVL) return 0.0f;
 
     return fft_run(string);

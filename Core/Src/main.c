@@ -393,19 +393,11 @@ void SystemClock_Config(void)
 /* USER CODE BEGIN 4 */
 //temp adjustment steps for now
 static uint32_t choose_motor_steps(float absolute_error_cents){
-  if (absolute_error_cents > 50.0f) {
-    return 40U;
-  }
-
-  if (absolute_error_cents > 20.0f) {
-    return 20U;
-  }
-
   if (absolute_error_cents > 8.0f) {
-    return 8U;
+    return 10U + (uint32_t)(absolute_error_cents*2.1);
   }
 
-  return 3U;
+  return 10U;
 }
 
 static float frequency_error_cents(float measured_hz, float target_hz){
