@@ -13,10 +13,17 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <sys/stat.h>
-#include <stdio.h>
 
 #define MIN_SIGNAL_LVL       120U
+
+/*
+ * The selected FFT peak must stand clearly above the remaining bins in the
+ * selected string's search band.  This rejects noise-only frames that would
+ * otherwise produce a frequency near the lower edge of the band.
+ */
+#define MIN_PEAK_TO_NOISE_POWER_RATIO     16.0f
+#define PEAK_EXCLUSION_BINS                1U
+#define MIN_NOISE_BIN_COUNT                2U
 
 #define SAMPLE_RATE_HZ       MIC_SAMPLE_RATE_HZ
 
@@ -61,6 +68,8 @@ static void *fft_cfg_buffer = NULL;
  */
 static uint32_t min_bin = 0U;
 static uint32_t max_bin = 0U;
+static uint32_t min_str_bin = 0U;
+static uint32_t max_str_bin = 0U;
 
 /*
  * FFT bin resolution
@@ -86,6 +95,10 @@ static uint32_t ave_amplitude(void);
 static void initialize_hann_window(void);
 static float get_magnitude_squared(uint32_t bin);
 static float interpolate_peak_bin(uint32_t peak_bin);
+static bool peak_has_sufficient_confidence(uint32_t peak_bin,
+                                           uint32_t search_min_bin,
+                                           uint32_t search_max_bin,
+                                           float peak_power);
 
 /*
  * Initialize the FFT.
@@ -177,7 +190,7 @@ float get_freq_fft(const int16_t *audio_buf, uint8_t string){
 
     //reject silence and low-level background noise.
     uint32_t average_amplitude = ave_amplitude();
-    printf("avg_amplitude=%lu\r\n", (unsigned long)average_amplitude);
+    //printf("avg_amplitude=%lu\r\n", (unsigned long)average_amplitude);
     if (average_amplitude < MIN_SIGNAL_LVL) return 0.0f;
 
     return fft_run(string);
@@ -195,46 +208,80 @@ static float fft_run(uint8_t string){
 
     kiss_fftr(fft_cfg, fft_in, fft_out);
 
-    uint32_t search_min = (uint32_t)floorf(
-        string_freq_mins[string] / bin_resolution);
-    uint32_t search_max = (uint32_t)ceilf(
-        string_freq_maxs[string] / bin_resolution);
+    min_str_bin = (uint32_t)(((uint64_t)string_freq_mins[string] * FFT_BUF_SIZE) / SAMPLE_RATE_HZ);
+	max_str_bin = (uint32_t)(((uint64_t)string_freq_maxs[string] * FFT_BUF_SIZE) / SAMPLE_RATE_HZ);
 
-    /* Include one bin outside the nominal range for edge detection. */
-    if (search_min > 1U) {
-        search_min--;
+	/*
+	 * Include one bin on each side so a peak close to a range boundary can
+	 * still be interpolated. The final frequency is checked against the exact
+	 * string range below.
+	 */
+	uint32_t search_min_bin = (min_str_bin > min_bin) ? min_str_bin - 1U : min_bin;
+	uint32_t search_max_bin = (max_str_bin < max_bin) ? max_str_bin + 1U : max_bin;
+
+	uint32_t best_bin = 0U;
+	float best_power = 0.0f;
+
+	for (uint32_t bin = search_min_bin; bin <= search_max_bin; bin++){
+		float power = get_magnitude_squared(bin);
+
+		if ((best_bin == 0U) || (power > best_power)){
+			best_power = power;
+			best_bin = bin;
+		}
+	}
+
+	/* Do not turn an empty or noise-only FFT band into its first bin. */
+	if ((best_bin == 0U) || (best_power <= PARABOLA_EPSILON)) return 0.0f;
+
+	if (!peak_has_sufficient_confidence(best_bin, search_min_bin, search_max_bin, best_power)){
+		return 0.0f;
+	}
+
+	float frequency_hz = interpolate_peak_bin(best_bin) * bin_resolution;
+
+	/*
+	 * Allow half a bin of estimation tolerance at a boundary. This matters
+	 * because a target note can sit exactly at the shared edge of two string
+	 * ranges (for example E2 at the top of the sixth-string range).
+	 */
+	float boundary_tolerance_hz = 0.5f * bin_resolution;
+
+	if ((frequency_hz < (string_freq_mins[string] - boundary_tolerance_hz)) ||
+		(frequency_hz > (string_freq_maxs[string] + boundary_tolerance_hz))){
+		return 0.0f;
+	}
+
+	return frequency_hz;
+}
+
+/*
+ * Compare the peak with the average background power in the same search band.
+ * The peak bin and its immediate neighbors are excluded because the Hann
+ * window deliberately spreads a real sinusoid into adjacent bins.
+ */
+static bool peak_has_sufficient_confidence(uint32_t peak_bin, uint32_t search_min_bin, uint32_t search_max_bin, float peak_power){
+    float noise_power_sum = 0.0f;
+    uint32_t noise_bin_count = 0U;
+
+    for (uint32_t bin = search_min_bin; bin <= search_max_bin; bin++){
+        uint32_t distance = (bin > peak_bin) ? (bin - peak_bin) : (peak_bin - bin);
+
+        if (distance <= PEAK_EXCLUSION_BINS) continue;
+
+        noise_power_sum += get_magnitude_squared(bin);
+        noise_bin_count++;
     }
 
-    uint32_t highest_safe_bin = (FFT_BUF_SIZE / 2U) - 1U;
-    if (search_max < highest_safe_bin) {
-        search_max++;
-    }
-    else {
-        search_max = highest_safe_bin;
-    }
+    if (noise_bin_count < MIN_NOISE_BIN_COUNT) return false;
 
-    /* Keep DC out of the pitch search and reject an invalid range. */
-    if (search_min < 1U) {
-        search_min = 1U;
-    }
-    if ((search_min > highest_safe_bin) || (search_min > search_max)) {
-        return 0.0f;
+    float average_noise_power = noise_power_sum / (float)noise_bin_count;
+
+    if (average_noise_power <= PARABOLA_EPSILON){
+        return peak_power > PARABOLA_EPSILON;
     }
 
-    uint32_t best_bin = search_min;
-    float best_power = get_magnitude_squared(best_bin);
-
-    for (uint32_t bin = search_min + 1U; bin <= search_max; bin++) {
-        float power = get_magnitude_squared(bin);
-
-        if (power > best_power) {
-            best_power = power;
-            best_bin = bin;
-        }
-    }
-
-    float fractional_bin = interpolate_peak_bin(best_bin);
-    return fractional_bin * bin_resolution;
+    return peak_power >= (average_noise_power * MIN_PEAK_TO_NOISE_POWER_RATIO);
 }
 
 /*
@@ -261,28 +308,33 @@ static float interpolate_peak_bin(uint32_t peak_bin){
      * The bins on both sides must exist and should be inside the search
      * region.
      */
-	if ((peak_bin == 0U) || (peak_bin >= (FFT_BUF_SIZE / 2U))){
-		return (float)peak_bin;
-	}
+    if ((peak_bin <= min_bin) || (peak_bin >= max_bin)){
+        return (float)peak_bin;
+    }
 
-    // Convert the magnitudes of the peak bin and its neighbors to the logarithmic scale for interpolation.
-	float left = logf(get_magnitude_squared(peak_bin - 1U) + PARABOLA_EPSILON);
-	float center = logf(get_magnitude_squared(peak_bin) + PARABOLA_EPSILON);
-	float right = logf(get_magnitude_squared(peak_bin + 1U) + PARABOLA_EPSILON);
+    float left = get_magnitude_squared(peak_bin - 1U);
+    float center = get_magnitude_squared(peak_bin);
+    float right = get_magnitude_squared(peak_bin + 1U);
 
-    // Calculate the denominator of the parabolic interpolation formula.
-	float denominator = left - (2.0f * center) + right;
-    // If the denominator is too small, the interpolation would be unreliable.
-	if(fabsf(denominator) < PARABOLA_EPSILON){
-		return (float)peak_bin;
-	}
+    float denominator = left - (2.0f * center) + right;
 
-    // Calculate the offset of the peak within the bin using parabolic interpolation.
-	float offset = 0.5f * (left - right) / denominator;
-	if (offset > 0.5f) offset = 0.5f;
-	else if (offset < -0.5f) offset = -0.5f;
+    if (fabsf(denominator) < PARABOLA_EPSILON){
+        return (float)peak_bin;
+    }
 
-	return (float)peak_bin + offset;
+    float offset = 0.5f * (left - right) / denominator;
+
+    /*
+     * A valid local parabolic estimate should not move more than half a bin.
+     */
+    if (offset > 0.5f){
+        offset = 0.5f;
+    }
+    else if (offset < -0.5f){
+        offset = -0.5f;
+    }
+
+    return (float)peak_bin + offset;
 }
 
 /*
@@ -297,7 +349,7 @@ static void initialize_hann_window(void){
 }
 
 /*
- * Center the unsigned ADC frame around zero by subtracting its mean.
+ * Center the ADC frame around zero by subtracting its mean.
  */
 static void center_audio_buffer(const int16_t *audio_buf){
     int32_t average = ave_audio_buffer(audio_buf);
