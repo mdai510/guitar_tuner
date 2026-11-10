@@ -47,6 +47,7 @@ typedef enum {
   STATE_LISTEN,
   STATE_ADJUST,
   STATE_SETTLE,
+  STATE_NEXT_STRING_WAIT,
   STATE_DONE
 } state_t;
 
@@ -65,6 +66,7 @@ typedef enum {
 #define FREQ_ALLOWED_DELTA_HZ 1.0f
 
 #define MOTOR_SETTLE_TIME_MS 150U
+#define NEXT_STRING_DELAY_MS 750U
 #define TUNING_TOLERANCE_CENTS 5.0f
 
 #define MOTOR_DIR_TIGHTEN 0U
@@ -94,6 +96,7 @@ static uint32_t ui_state = UI_DIRTY_FULL;
 static uint32_t last_ui_update = 0U;
 
 static uint32_t motor_settle_start = 0U;
+static uint32_t next_string_start = 0U;
 
 /* USER CODE END PV */
 
@@ -231,17 +234,25 @@ int main(void)
 
 				  //if frequency is close enough to the target, move to the next string
 				  if (fabsf(error_cents) <= TUNING_TOLERANCE_CENTS) {
-					  printf("String %u in tune: %.2f Hz\r\n", (unsigned int)current_string, audio_result.frequency_hz);
-					  if (current_string <= 1U) {
-						  microphone_stop();
-						  state = STATE_DONE;
-						  ui_state = UI_DIRTY_FULL;
-					  }
-					  else {
-						  current_string--;
-						  audio_processing_reset();
-						  ui_state |= UI_DIRTY_STRING;
-					  }
+				      printf("String %u in tune: %.2f Hz\r\n",
+				             (unsigned int)current_string,
+				             audio_result.frequency_hz);
+
+				      microphone_stop();
+				      audio_processing_reset();
+
+				      if (current_string <= 1U) {
+				          state = STATE_DONE;
+				          ui_state = UI_DIRTY_FULL;
+				      }
+				      else {
+				          /*
+				           * Keep current_string unchanged during the delay so the display
+				           * continues showing the string that was just completed.
+				           */
+				          next_string_start = HAL_GetTick();
+				          state = STATE_NEXT_STRING_WAIT;
+				      }
 				  }
 				  //else record the current frequency and then adjust based on it
 				  else{
@@ -277,6 +288,18 @@ int main(void)
     		  state = STATE_LISTEN;
     	  }
     	  break;
+
+      case STATE_NEXT_STRING_WAIT:
+          if ((HAL_GetTick() - next_string_start) >= NEXT_STRING_DELAY_MS) {
+              current_string--;
+
+              audio_processing_reset();
+              microphone_start();
+
+              ui_state |= UI_DIRTY_STRING;
+              state = STATE_LISTEN;
+          }
+          break;
 
       case STATE_DONE:
         if (b1_pressed_debounced()) {
@@ -393,8 +416,8 @@ void SystemClock_Config(void)
 /* USER CODE BEGIN 4 */
 //temp adjustment steps for now
 static uint32_t choose_motor_steps(float absolute_error_cents){
-  if (absolute_error_cents > 8.0f) {
-    return 10U + (uint32_t)(absolute_error_cents*2.1);
+  if (absolute_error_cents > 5.0f) {
+    return 10U + (uint32_t)(absolute_error_cents*4.2);
   }
 
   return 10U;

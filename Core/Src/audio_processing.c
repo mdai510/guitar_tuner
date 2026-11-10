@@ -21,6 +21,9 @@
 /* A three-frame median removes isolated incorrect FFT readings. */
 #define MEDIAN_WINDOW_SIZE            3U
 
+#define LOW_STRING_DETECTION_COUNT     2U
+#define HIGH_STRING_DETECTION_COUNT    1U
+
 static int16_t audio_buf[MIC_HALF_BUF_SIZE];
 static float previous_frequency = 0.0f;
 static uint8_t stable_sample_count = 0U;
@@ -62,6 +65,15 @@ static void reset_detection_state(void){
 	}
 }
 
+
+static uint8_t required_detection_count(uint8_t string){
+    /* Strings 1–3 are the high E, B, and G strings. */
+    if (string <= 3U) {
+        return HIGH_STRING_DETECTION_COUNT;
+    }
+
+    return LOW_STRING_DETECTION_COUNT;
+}
 /*
  * Process a single completed DMA half, compute its FFT frequency, and update
  * the median and consecutive-stability filters.
@@ -113,9 +125,11 @@ static bool process_frame(uint32_t ready_flag,
 
 	previous_frequency = filtered_frequency;
 
-	if (stable_sample_count >= NUM_SAMPLES_FOR_DETECTION){
-		result->stable_frequency = true;
-		stable_sample_count = 0U;
+	uint8_t required_count = required_detection_count(string);
+
+	if (stable_sample_count >= required_count) {
+	    result->stable_frequency = true;
+	    stable_sample_count = 0U;
 	}
 
 	return true;

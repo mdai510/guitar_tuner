@@ -14,7 +14,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#define MIN_SIGNAL_LVL       120U
+#define DEFAULT_MIN_SIGNAL_LVL       120U
 
 /*
  * The selected FFT peak must stand clearly above the remaining bins in the
@@ -83,6 +83,15 @@ static uint8_t fft_initialized = 0U;
 
 static float string_freq_mins[6] = {STRING_1_MIN_HZ, STRING_2_MIN_HZ, STRING_3_MIN_HZ, STRING_4_MIN_HZ, STRING_5_MIN_HZ, STRING_6_MIN_HZ};
 static float string_freq_maxs[6] = {STRING_1_MAX_HZ, STRING_2_MAX_HZ, STRING_3_MAX_HZ, STRING_4_MAX_HZ, STRING_5_MAX_HZ, STRING_6_MAX_HZ};
+
+static const uint32_t min_signal_level[6] = {
+	DEFAULT_MIN_SIGNAL_LVL - 40,   	/* String 1: high E */
+	DEFAULT_MIN_SIGNAL_LVL - 20,   	/* String 2: B */
+	DEFAULT_MIN_SIGNAL_LVL - 10,   	/* String 3: G */
+    DEFAULT_MIN_SIGNAL_LVL,  		/* String 4: D */
+	DEFAULT_MIN_SIGNAL_LVL,  		/* String 5: A */
+	DEFAULT_MIN_SIGNAL_LVL - 20   	/* String 6: low E */
+};
 
 /* Private function declarations */
 
@@ -191,7 +200,7 @@ float get_freq_fft(const int16_t *audio_buf, uint8_t string){
     //reject silence and low-level background noise.
     uint32_t average_amplitude = ave_amplitude();
     //printf("avg_amplitude=%lu\r\n", (unsigned long)average_amplitude);
-    if (average_amplitude < MIN_SIGNAL_LVL) return 0.0f;
+    if(average_amplitude < min_signal_level[string]) return 0.0f;
 
     return fft_run(string);
 }
